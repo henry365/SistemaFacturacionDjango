@@ -144,6 +144,11 @@ class ActivoFijo(models.Model):
         verbose_name_plural = 'Activos Fijos'
         unique_together = ('empresa', 'codigo_interno')
         ordering = ['-fecha_creacion']
+        permissions = [
+            ('depreciar_activofijo', 'Puede registrar depreciaciones de activos'),
+            ('cambiar_estado_activofijo', 'Puede cambiar el estado de activos'),
+            ('ver_proyeccion_activofijo', 'Puede ver proyecciones de depreciación'),
+        ]
 
     def __str__(self):
         return f"{self.codigo_interno} - {self.nombre}"

@@ -730,3 +730,119 @@ class DepreciacionServiceTest(TestCase):
         )
         self.assertEqual(len(proyeccion), 12)
         self.assertEqual(proyeccion[0]['monto_depreciacion'], Decimal('1000.00'))
+
+
+class PermisosActivosTest(TestCase):
+    """Tests para permisos granulares en activos"""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+        from django.contrib.contenttypes.models import ContentType
+
+        self.empresa = Empresa.objects.create(
+            nombre='Test Empresa',
+            rnc='123456789'
+        )
+        self.tipo = TipoActivo.objects.create(
+            empresa=self.empresa,
+            nombre='Vehiculos',
+            porcentaje_depreciacion_anual=Decimal('25.00'),
+            vida_util_anos=4
+        )
+        # Usuario sin permisos especiales
+        self.user_sin_permisos = User.objects.create_user(
+            username='user_sin_permisos',
+            password='test123',
+            empresa=self.empresa
+        )
+        # Usuario con permisos de depreciación
+        self.user_con_permisos = User.objects.create_user(
+            username='user_con_permisos',
+            password='test123',
+            empresa=self.empresa
+        )
+        # Obtener y asignar permiso de depreciación
+        content_type = ContentType.objects.get_for_model(ActivoFijo)
+        perm_depreciar = Permission.objects.get(
+            codename='depreciar_activofijo',
+            content_type=content_type
+        )
+        perm_cambiar = Permission.objects.get(
+            codename='cambiar_estado_activofijo',
+            content_type=content_type
+        )
+        self.user_con_permisos.user_permissions.add(perm_depreciar, perm_cambiar)
+
+        # Usuario staff
+        self.user_staff = User.objects.create_user(
+            username='user_staff',
+            password='test123',
+            empresa=self.empresa,
+            is_staff=True
+        )
+
+        self.activo = ActivoFijo.objects.create(
+            empresa=self.empresa,
+            tipo_activo=self.tipo,
+            codigo_interno='VEH-PERM-001',
+            nombre='Toyota Test',
+            fecha_adquisicion=date.today() - timedelta(days=365),
+            valor_adquisicion=Decimal('48000.00'),
+            valor_libro_actual=Decimal('48000.00')
+        )
+
+        self.client = APIClient()
+
+    def test_depreciar_sin_permiso_denegado(self):
+        """Test: Usuario sin permiso no puede depreciar"""
+        self.client.force_authenticate(user=self.user_sin_permisos)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/depreciar/',
+            {'fecha': str(date.today())}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_depreciar_con_permiso_permitido(self):
+        """Test: Usuario con permiso puede depreciar"""
+        self.client.force_authenticate(user=self.user_con_permisos)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/depreciar/',
+            {'fecha': str(date.today())}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_depreciar_staff_permitido(self):
+        """Test: Usuario staff puede depreciar"""
+        self.client.force_authenticate(user=self.user_staff)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/depreciar/',
+            {'fecha': str(date.today())}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_cambiar_estado_sin_permiso_denegado(self):
+        """Test: Usuario sin permiso no puede cambiar estado"""
+        self.client.force_authenticate(user=self.user_sin_permisos)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/cambiar_estado/',
+            {'estado': 'MANTENIMIENTO'}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_cambiar_estado_con_permiso_permitido(self):
+        """Test: Usuario con permiso puede cambiar estado"""
+        self.client.force_authenticate(user=self.user_con_permisos)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/cambiar_estado/',
+            {'estado': 'MANTENIMIENTO'}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_cambiar_estado_staff_permitido(self):
+        """Test: Usuario staff puede cambiar estado"""
+        self.client.force_authenticate(user=self.user_staff)
+        response = self.client.post(
+            f'/api/v1/activos/activos/{self.activo.id}/cambiar_estado/',
+            {'estado': 'MANTENIMIENTO'}
+        )
+        self.assertEqual(response.status_code, 200)

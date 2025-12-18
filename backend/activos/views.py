@@ -10,6 +10,7 @@ from rest_framework.pagination import PageNumberPagination
 
 from core.mixins import EmpresaFilterMixin
 from .services import DepreciacionService, ActivoFijoService
+from .permissions import CanDepreciarActivo, CanCambiarEstadoActivo, CanVerProyeccion
 
 
 class ActivosPagination(PageNumberPagination):
@@ -141,10 +142,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         ).order_by('tipo_activo__nombre')
         return Response(resumen)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanDepreciarActivo])
     def depreciar(self, request, pk=None):
         """
         Calcula y registra la depreciacion de un activo.
+
+        Requiere permiso: activos.depreciar_activofijo (o ser staff/superuser)
 
         Metodo: Linea recta (DGII RD)
         - Depreciacion = valor_adquisicion * (tasa_anual / 12 / 100)
@@ -203,10 +206,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         serializer = DepreciacionSerializer(depreciaciones, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanCambiarEstadoActivo])
     def cambiar_estado(self, request, pk=None):
         """
         Cambia el estado de un activo.
+
+        Requiere permiso: activos.cambiar_estado_activofijo (o ser staff/superuser)
 
         Request body:
             - estado: Nuevo estado (ACTIVO, MANTENIMIENTO, DEPRECIADO, VENDIDO, DESINCORPORADO)
@@ -232,10 +237,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
         return Response(ActivoFijoSerializer(activo).data)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated, CanVerProyeccion])
     def proyeccion_depreciacion(self, request, pk=None):
         """
         Calcula una proyección de depreciaciones futuras para el activo.
+
+        Requiere permiso: activos.ver_proyeccion_activofijo (o ser staff/superuser)
 
         Query params:
             - meses: Número de meses a proyectar (default: 12, max: 120)
