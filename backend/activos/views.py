@@ -1,10 +1,11 @@
 """
 Views para Activos Fijos
 """
+import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from django.db import transaction
 from decimal import Decimal
 
@@ -18,10 +19,19 @@ from .serializers import (
     CalcularDepreciacionSerializer
 )
 
+logger = logging.getLogger(__name__)
+
 
 class TipoActivoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de activos.
+
+    Endpoints:
+    - GET /api/v1/activos/tipos/ - Lista tipos de activos
+    - POST /api/v1/activos/tipos/ - Crea nuevo tipo
+    - GET /api/v1/activos/tipos/{id}/ - Detalle de tipo
+    - PUT/PATCH /api/v1/activos/tipos/{id}/ - Actualiza tipo
+    - DELETE /api/v1/activos/tipos/{id}/ - Elimina tipo
     """
     queryset = TipoActivo.objects.all()
     serializer_class = TipoActivoSerializer
@@ -38,8 +48,26 @@ class TipoActivoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar activos fijos.
+
+    Endpoints:
+    - GET /api/v1/activos/activos/ - Lista activos
+    - POST /api/v1/activos/activos/ - Crea nuevo activo
+    - GET /api/v1/activos/activos/{id}/ - Detalle de activo
+    - PUT/PATCH /api/v1/activos/activos/{id}/ - Actualiza activo
+    - DELETE /api/v1/activos/activos/{id}/ - Elimina activo
+    - POST /api/v1/activos/activos/{id}/depreciar/ - Registra depreciacion
+    - GET /api/v1/activos/activos/{id}/historial_depreciacion/ - Historial
+    - POST /api/v1/activos/activos/{id}/cambiar_estado/ - Cambia estado
+    - GET /api/v1/activos/activos/por_estado/ - Resumen por estado
+    - GET /api/v1/activos/activos/por_tipo/ - Resumen por tipo
     """
-    queryset = ActivoFijo.objects.select_related('tipo_activo', 'responsable').all()
+    queryset = ActivoFijo.objects.select_related(
+        'tipo_activo',
+        'responsable',
+        'empresa',
+        'usuario_creacion',
+        'usuario_modificacion'
+    ).all()
     permission_classes = [IsAuthenticated]
     filterset_fields = ['tipo_activo', 'estado', 'ubicacion_fisica']
     search_fields = ['codigo_interno', 'nombre', 'marca', 'modelo', 'serial']
@@ -62,7 +90,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def por_estado(self, request):
-        """Resumen de activos por estado"""
+        """
+        Resumen de activos por estado.
+
+        Returns:
+            Lista con cantidad, valor_total y valor_libro_total por cada estado.
+        """
         from django.db.models import Count, Sum
         resumen = self.get_queryset().values('estado').annotate(
             cantidad=Count('id'),
@@ -73,7 +106,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def por_tipo(self, request):
-        """Resumen de activos por tipo"""
+        """
+        Resumen de activos por tipo de activo.
+
+        Returns:
+            Lista con cantidad, valor_total y valor_libro_total por tipo.
+        """
         from django.db.models import Count, Sum
         resumen = self.get_queryset().values(
             'tipo_activo__nombre'
@@ -88,6 +126,17 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     def depreciar(self, request, pk=None):
         """
         Calcula y registra la depreciacion de un activo.
+
+        Metodo: Linea recta (DGII RD)
+        - Depreciacion = valor_adquisicion * (tasa_anual / 12 / 100)
+
+        Request body:
+            - fecha: Fecha de la depreciacion (YYYY-MM-DD)
+            - observacion: Comentario opcional
+
+        Returns:
+            - depreciacion: Datos de la depreciacion creada
+            - activo: valor_libro_actual y estado actualizados
         """
         activo = self.get_object()
 
@@ -111,9 +160,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Calcular depreciacion
+        # Calcular depreciacion usando metodo de linea recta (DGII RD)
+        # Nota: Se usa valor_adquisicion para linea recta (depreciacion constante)
+        # Si se requiere metodo de saldos decrecientes, usar valor_libro_actual
         tasa_mensual = activo.tipo_activo.porcentaje_depreciacion_anual / Decimal('12') / Decimal('100')
         monto_depreciacion = activo.valor_adquisicion * tasa_mensual
+        # Asegurar que no se deprecie mas del valor libro actual
         monto_depreciacion = min(monto_depreciacion, activo.valor_libro_actual)
 
         valor_libro_anterior = activo.valor_libro_actual
@@ -131,9 +183,18 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
             )
 
             # Actualizar estado si esta totalmente depreciado
-            if activo.valor_libro_actual <= 0:
+            # Usar valor_libro_nuevo en lugar de activo.valor_libro_actual
+            # porque el objeto en memoria no se ha refrescado
+            if valor_libro_nuevo <= 0:
+                activo.refresh_from_db()
                 activo.estado = 'DEPRECIADO'
                 activo.save(update_fields=['estado'])
+
+        # Log de operacion critica
+        logger.info(
+            f"Depreciacion registrada: Activo {activo.codigo_interno}, "
+            f"Monto {monto_depreciacion}, Usuario {request.user.username}"
+        )
 
         return Response({
             'depreciacion': DepreciacionSerializer(depreciacion).data,
@@ -145,7 +206,12 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def historial_depreciacion(self, request, pk=None):
-        """Obtiene el historial de depreciaciones de un activo"""
+        """
+        Obtiene el historial de depreciaciones de un activo.
+
+        Returns:
+            Lista de todas las depreciaciones del activo ordenadas por fecha desc.
+        """
         activo = self.get_object()
         depreciaciones = activo.depreciaciones.all()
         serializer = DepreciacionSerializer(depreciaciones, many=True)
@@ -153,7 +219,15 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def cambiar_estado(self, request, pk=None):
-        """Cambia el estado de un activo"""
+        """
+        Cambia el estado de un activo.
+
+        Request body:
+            - estado: Nuevo estado (ACTIVO, MANTENIMIENTO, DEPRECIADO, VENDIDO, DESINCORPORADO)
+
+        Returns:
+            Datos completos del activo actualizado.
+        """
         activo = self.get_object()
         nuevo_estado = request.data.get('estado')
 
@@ -164,19 +238,34 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        estado_anterior = activo.estado
         activo.estado = nuevo_estado
         activo.usuario_modificacion = request.user
         activo.save()
 
+        # Log de cambio de estado
+        logger.info(
+            f"Cambio de estado: Activo {activo.codigo_interno}, "
+            f"{estado_anterior} -> {nuevo_estado}, Usuario {request.user.username}"
+        )
+
         return Response(ActivoFijoSerializer(activo).data)
 
 
-class DepreciacionViewSet(viewsets.ModelViewSet):
+class DepreciacionViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet para gestionar depreciaciones.
-    Solo lectura excepto para admins.
+    ViewSet para consultar depreciaciones.
+    Solo lectura - las depreciaciones se crean via /activos/{id}/depreciar/
+
+    Endpoints:
+    - GET /api/v1/activos/depreciaciones/ - Lista depreciaciones
+    - GET /api/v1/activos/depreciaciones/{id}/ - Detalle de depreciacion
     """
-    queryset = Depreciacion.objects.select_related('activo').all()
+    queryset = Depreciacion.objects.select_related(
+        'activo',
+        'activo__empresa',
+        'usuario_creacion'
+    ).all()
     serializer_class = DepreciacionSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ['activo', 'fecha']
@@ -189,6 +278,3 @@ class DepreciacionViewSet(viewsets.ModelViewSet):
         if hasattr(self.request.user, 'empresa') and self.request.user.empresa:
             return qs.filter(activo__empresa=self.request.user.empresa)
         return qs.none()
-
-    def perform_create(self, serializer):
-        serializer.save(usuario_creacion=self.request.user)

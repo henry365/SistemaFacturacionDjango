@@ -47,6 +47,32 @@ class ActivoFijoSerializer(serializers.ModelSerializer):
             'usuario_creacion', 'usuario_modificacion', 'empresa'
         ]
 
+    def validate_tipo_activo(self, value):
+        """Valida que el tipo_activo pertenezca a la misma empresa del usuario"""
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'empresa'):
+            user_empresa = request.user.empresa
+            if value.empresa is not None and user_empresa is not None:
+                if value.empresa != user_empresa:
+                    raise serializers.ValidationError(
+                        'El tipo de activo debe pertenecer a su empresa'
+                    )
+        return value
+
+    def validate(self, data):
+        """Validaciones adicionales del activo"""
+        valor_adquisicion = data.get('valor_adquisicion')
+        valor_libro_actual = data.get('valor_libro_actual')
+
+        # Validar que valor_libro_actual <= valor_adquisicion
+        if valor_adquisicion is not None and valor_libro_actual is not None:
+            if valor_libro_actual > valor_adquisicion:
+                raise serializers.ValidationError({
+                    'valor_libro_actual': 'El valor libro no puede ser mayor al valor de adquisicion'
+                })
+
+        return data
+
 
 class ActivoFijoListSerializer(serializers.ModelSerializer):
     """Serializer simplificado para listados de activos"""

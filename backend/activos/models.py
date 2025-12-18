@@ -3,9 +3,12 @@ Modelos para Activos Fijos
 
 Django 6.0: Usa GeneratedField para depreciacion_acumulada
 """
-from django.db import models
+from decimal import Decimal
+from django.db import models, transaction
 from django.db.models import F, GeneratedField
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from productos.models import Producto
 from compras.models import Compra, DetalleCompra
 import uuid
@@ -41,6 +44,29 @@ class TipoActivo(models.Model):
 
     def __str__(self):
         return self.nombre
+
+    def clean(self):
+        """Validaciones de negocio para TipoActivo"""
+        errors = {}
+
+        # Validar porcentaje de depreciacion entre 0 y 100
+        if self.porcentaje_depreciacion_anual is not None:
+            if self.porcentaje_depreciacion_anual < 0:
+                errors['porcentaje_depreciacion_anual'] = 'El porcentaje no puede ser negativo'
+            elif self.porcentaje_depreciacion_anual > 100:
+                errors['porcentaje_depreciacion_anual'] = 'El porcentaje no puede ser mayor a 100'
+
+        # Validar vida util positiva
+        if self.vida_util_anos is not None and self.vida_util_anos <= 0:
+            errors['vida_util_anos'] = 'La vida util debe ser mayor a 0'
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
 
 class ActivoFijo(models.Model):
     """Registro de activos fijos de la empresa"""
@@ -80,7 +106,7 @@ class ActivoFijo(models.Model):
     responsable = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='activos_asignados')
 
     # Valoracion
-    fecha_adquisicion = models.DateField()
+    fecha_adquisicion = models.DateField(db_index=True)
     valor_adquisicion = models.DecimalField(max_digits=14, decimal_places=2)
     valor_libro_actual = models.DecimalField(max_digits=14, decimal_places=2, help_text="Valor tras depreciacion acumulada")
 
@@ -120,12 +146,50 @@ class ActivoFijo(models.Model):
     def __str__(self):
         return f"{self.codigo_interno} - {self.nombre}"
 
+    def clean(self):
+        """Validaciones de negocio para ActivoFijo"""
+        errors = {}
+
+        # Validar valores monetarios no negativos
+        if self.valor_adquisicion is not None and self.valor_adquisicion < 0:
+            errors['valor_adquisicion'] = 'El valor de adquisicion no puede ser negativo'
+
+        if self.valor_libro_actual is not None and self.valor_libro_actual < 0:
+            errors['valor_libro_actual'] = 'El valor libro no puede ser negativo'
+
+        # Validar que valor_libro_actual <= valor_adquisicion
+        if (self.valor_adquisicion is not None and
+            self.valor_libro_actual is not None and
+            self.valor_libro_actual > self.valor_adquisicion):
+            errors['valor_libro_actual'] = 'El valor libro no puede ser mayor al valor de adquisicion'
+
+        # Validar que fecha_adquisicion no sea futura
+        if self.fecha_adquisicion is not None and self.fecha_adquisicion > timezone.now().date():
+            errors['fecha_adquisicion'] = 'La fecha de adquisicion no puede ser futura'
+
+        # Validar que tipo_activo pertenezca a la misma empresa
+        if (self.empresa is not None and
+            self.tipo_activo is not None and
+            self.tipo_activo.empresa is not None and
+            self.tipo_activo.empresa != self.empresa):
+            errors['tipo_activo'] = 'El tipo de activo debe pertenecer a la misma empresa'
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        # Solo ejecutar full_clean si no es update_fields
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        super().save(*args, **kwargs)
+
     @property
     def porcentaje_depreciado(self):
         """Retorna el porcentaje de depreciacion"""
         if self.valor_adquisicion > 0:
             return round((self.depreciacion_acumulada / self.valor_adquisicion) * 100, 2)
         return 0
+
 
 class Depreciacion(models.Model):
     """Registro de depreciacion periodica de activos fijos"""
@@ -150,12 +214,48 @@ class Depreciacion(models.Model):
         verbose_name_plural = 'Depreciaciones'
         ordering = ['-fecha']
         unique_together = ('activo', 'fecha')
+        indexes = [
+            models.Index(fields=['activo', 'fecha'], name='activos_dep_activo_fecha_idx'),
+        ]
 
     def __str__(self):
         return f"Depreciacion {self.activo.codigo_interno} - {self.fecha} ({self.monto})"
 
+    def clean(self):
+        """Validaciones de negocio para Depreciacion"""
+        errors = {}
+
+        # Validar que valor_libro_nuevo >= 0
+        if self.valor_libro_nuevo is not None and self.valor_libro_nuevo < 0:
+            errors['valor_libro_nuevo'] = 'El valor libro nuevo no puede ser negativo'
+
+        # Validar que monto >= 0
+        if self.monto is not None and self.monto < 0:
+            errors['monto'] = 'El monto de depreciacion no puede ser negativo'
+
+        # Validar consistencia: valor_libro_nuevo = valor_libro_anterior - monto
+        if (self.valor_libro_nuevo is not None and
+            self.valor_libro_anterior is not None and
+            self.monto is not None):
+            expected_nuevo = self.valor_libro_anterior - self.monto
+            if abs(self.valor_libro_nuevo - expected_nuevo) > Decimal('0.01'):
+                errors['valor_libro_nuevo'] = f'El valor libro nuevo debe ser {expected_nuevo} (anterior - monto)'
+
+        # Validar que fecha >= fecha_adquisicion del activo
+        if (self.activo_id is not None and
+            self.fecha is not None and
+            hasattr(self, 'activo') and
+            self.activo.fecha_adquisicion is not None and
+            self.fecha < self.activo.fecha_adquisicion):
+            errors['fecha'] = 'La fecha de depreciacion no puede ser anterior a la fecha de adquisicion'
+
+        if errors:
+            raise ValidationError(errors)
+
     def save(self, *args, **kwargs):
-        """Actualiza el valor libro del activo al guardar"""
-        super().save(*args, **kwargs)
-        self.activo.valor_libro_actual = self.valor_libro_nuevo
-        self.activo.save(update_fields=['valor_libro_actual', 'fecha_actualizacion'])
+        """Actualiza el valor libro del activo al guardar con transaccion atomica"""
+        self.full_clean()
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            self.activo.valor_libro_actual = self.valor_libro_nuevo
+            self.activo.save(update_fields=['valor_libro_actual', 'fecha_actualizacion'])
