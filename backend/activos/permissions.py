@@ -3,11 +3,16 @@ Permisos personalizados para el módulo de Activos Fijos
 
 Define permisos granulares para operaciones críticas como
 depreciación y cambio de estado de activos.
+
+Usa las clases base genéricas de core.permissions para
+eliminar código duplicado y mantener consistencia.
 """
+from core.permissions import BaseEmpresaPermission
+from core.permissions.mixins import ResponsableValidationMixin, AdminStaffMixin
 from rest_framework import permissions
 
 
-class CanDepreciarActivo(permissions.BasePermission):
+class CanDepreciarActivo(BaseEmpresaPermission):
     """
     Permiso para registrar depreciaciones de activos.
 
@@ -15,39 +20,15 @@ class CanDepreciarActivo(permissions.BasePermission):
     - Es superusuario o staff, O
     - Tiene el permiso 'activos.depreciar_activofijo'
     """
-    message = 'No tiene permiso para registrar depreciaciones de activos.'
 
-    def has_permission(self, request, view):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        return request.user.has_perm('activos.depreciar_activofijo')
-
-    def has_object_permission(self, request, view, obj):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        if not request.user.has_perm('activos.depreciar_activofijo'):
-            return False
-
-        # Verificar que el activo pertenezca a la empresa del usuario
-        if hasattr(obj, 'empresa') and hasattr(request.user, 'empresa'):
-            return obj.empresa == request.user.empresa
-
-        return False
+    def __init__(self):
+        super().__init__(
+            permission_codename='activos.depreciar_activofijo',
+            message='No tiene permiso para registrar depreciaciones de activos.'
+        )
 
 
-class CanCambiarEstadoActivo(permissions.BasePermission):
+class CanCambiarEstadoActivo(BaseEmpresaPermission):
     """
     Permiso para cambiar el estado de activos.
 
@@ -55,39 +36,15 @@ class CanCambiarEstadoActivo(permissions.BasePermission):
     - Es superusuario o staff, O
     - Tiene el permiso 'activos.cambiar_estado_activofijo'
     """
-    message = 'No tiene permiso para cambiar el estado de activos.'
 
-    def has_permission(self, request, view):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        return request.user.has_perm('activos.cambiar_estado_activofijo')
-
-    def has_object_permission(self, request, view, obj):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        if not request.user.has_perm('activos.cambiar_estado_activofijo'):
-            return False
-
-        # Verificar que el activo pertenezca a la empresa del usuario
-        if hasattr(obj, 'empresa') and hasattr(request.user, 'empresa'):
-            return obj.empresa == request.user.empresa
-
-        return False
+    def __init__(self):
+        super().__init__(
+            permission_codename='activos.cambiar_estado_activofijo',
+            message='No tiene permiso para cambiar el estado de activos.'
+        )
 
 
-class CanVerProyeccion(permissions.BasePermission):
+class CanVerProyeccion(BaseEmpresaPermission):
     """
     Permiso para ver proyecciones de depreciación.
 
@@ -95,39 +52,15 @@ class CanVerProyeccion(permissions.BasePermission):
     - Es superusuario o staff, O
     - Tiene el permiso 'activos.ver_proyeccion_activofijo'
     """
-    message = 'No tiene permiso para ver proyecciones de depreciación.'
 
-    def has_permission(self, request, view):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        return request.user.has_perm('activos.ver_proyeccion_activofijo')
-
-    def has_object_permission(self, request, view, obj):
-        if not request.user.is_authenticated:
-            return False
-
-        # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
-            return True
-
-        # Verificar permiso específico
-        if not request.user.has_perm('activos.ver_proyeccion_activofijo'):
-            return False
-
-        # Verificar que el activo pertenezca a la empresa del usuario
-        if hasattr(obj, 'empresa') and hasattr(request.user, 'empresa'):
-            return obj.empresa == request.user.empresa
-
-        return False
+    def __init__(self):
+        super().__init__(
+            permission_codename='activos.ver_proyeccion_activofijo',
+            message='No tiene permiso para ver proyecciones de depreciación.'
+        )
 
 
-class IsActivoResponsable(permissions.BasePermission):
+class IsActivoResponsable(ResponsableValidationMixin, AdminStaffMixin, permissions.BasePermission):
     """
     Permiso que verifica si el usuario es el responsable del activo.
 
@@ -141,11 +74,8 @@ class IsActivoResponsable(permissions.BasePermission):
             return False
 
         # Superusuarios y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
+        if self._is_admin_or_staff(request.user):
             return True
 
         # Verificar si el usuario es el responsable
-        if hasattr(obj, 'responsable') and obj.responsable:
-            return obj.responsable == request.user
-
-        return False
+        return self._is_responsable(obj, request.user)
