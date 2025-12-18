@@ -231,7 +231,8 @@ if not DEBUG:
 # =============================================================================
 # HTTPS/SSL Security Settings (Production)
 # =============================================================================
-if not DEBUG:
+# Only enable SSL redirect when explicitly set (not in CI)
+if not DEBUG and os.getenv('SECURE_SSL_REDIRECT', 'False') == 'True':
     # Force HTTPS
     SECURE_SSL_REDIRECT = True
 
@@ -252,9 +253,13 @@ if not DEBUG:
 # =============================================================================
 # Logging Configuration
 # =============================================================================
-# Create logs directory if it doesn't exist
+# Create logs directory if it doesn't exist (skip in CI/read-only environments)
 LOGS_DIR = BASE_DIR / 'logs'
-LOGS_DIR.mkdir(exist_ok=True)
+try:
+    LOGS_DIR.mkdir(exist_ok=True)
+except (OSError, PermissionError):
+    LOGS_DIR = Path('/tmp/django_logs')
+    LOGS_DIR.mkdir(exist_ok=True)
 
 LOGGING = {
     'version': 1,
