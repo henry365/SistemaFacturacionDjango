@@ -1,0 +1,152 @@
+from rest_framework import permissions
+from functools import wraps
+
+class ActionBasedPermission(permissions.DjangoModelPermissions):
+    """
+    Clase de permiso extendida que mapea acciones de DRF a permisos de Django.
+    
+    Mapeo por defecto:
+    - GET (list/retrieve) -> view_model
+    - POST (create) -> add_model
+    - PUT/PATCH (update) -> change_model
+    - DELETE (destroy) -> delete_model
+    
+    Para acciones custom (@action), se puede definir el permiso requerido usando
+    el decorador @require_permission o en el atributo 'permission_required' de la acción.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.perms_map = {
+            'GET': ['%(app_label)s.view_%(model_name)s'],
+            'OPTIONS': [],
+            'HEAD': [],
+            'POST': ['%(app_label)s.add_%(model_name)s'],
+            'PUT': ['%(app_label)s.change_%(model_name)s'],
+            'PATCH': ['%(app_label)s.change_%(model_name)s'],
+            'DELETE': ['%(app_label)s.delete_%(model_name)s'],
+        }
+
+    def has_permission(self, request, view):
+        # Permitir acceso a usuarios autenticados para endpoints sin modelo (si los hay)
+        if not hasattr(view, 'queryset') or view.queryset is None:
+            return True
+        
+        # Verificar permisos específicos para acciones personalizadas
+        if hasattr(view, 'action') and view.action:
+            # Verificar si la acción tiene un permiso específico definido
+            action_method = getattr(view, view.action, None)
+            if action_method:
+                permission_required = getattr(action_method, 'permission_required', None)
+                if permission_required:
+                    if isinstance(permission_required, str):
+                        permission_required = [permission_required]
+                    return request.user.has_perms(permission_required)
+        
+        return super().has_permission(request, view)
+    
+    def has_object_permission(self, request, view, obj):
+        """
+        Verificar permisos a nivel de objeto.
+        Por defecto, permite si el usuario tiene el permiso a nivel de modelo.
+        """
+        # Llamar al método padre para verificar permisos básicos
+        if not super().has_object_permission(request, view, obj):
+            return False
+        
+        # Verificar permisos específicos para acciones personalizadas en objetos
+        if hasattr(view, 'action') and view.action:
+            action_method = getattr(view, view.action, None)
+            if action_method:
+                permission_required = getattr(action_method, 'permission_required', None)
+                if permission_required:
+                    if isinstance(permission_required, str):
+                        permission_required = [permission_required]
+                    return request.user.has_perms(permission_required)
+        
+        return True
+
+class IsAdminUserOrReadOnly(permissions.IsAdminUser):
+    def has_permission(self, request, view):
+        is_admin = super().has_permission(request, view)
+        return request.method in permissions.SAFE_METHODS or is_admin
+
+class HasPermissionOrReadOnly(permissions.BasePermission):
+    """
+    Permiso que requiere un permiso específico para escritura, pero permite lectura.
+    """
+    def __init__(self, permission_required):
+        self.permission_required = permission_required
+    
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return request.user.has_perm(self.permission_required)
+    
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return request.user.has_perm(self.permission_required)
+
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    """
+    Permiso que permite a los usuarios ver/editar solo sus propios objetos.
+    Requiere que el objeto tenga un campo 'usuario' o 'user' o que sea el mismo usuario.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Permitir lectura para todos
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        
+        # Si el objeto es un User, verificar que sea el mismo usuario
+        if hasattr(obj, 'id') and hasattr(request.user, 'id'):
+            if obj.id == request.user.id:
+                return True
+        
+        # Verificar campos comunes de usuario
+        user_field = getattr(obj, 'usuario', None) or getattr(obj, 'user', None) or getattr(obj, 'usuario_creacion', None)
+        if user_field:
+            return user_field == request.user
+        
+        # Por defecto, denegar si no se puede determinar la propiedad
+        return False
+
+class IsAdminOrSameEmpresa(permissions.BasePermission):
+    """
+    Permiso que permite a administradores todo, o a usuarios normales solo objetos de su empresa.
+    """
+    def has_permission(self, request, view):
+        # Administradores tienen acceso completo
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+        return request.user.is_authenticated
+    
+    def has_object_permission(self, request, view, obj):
+        # Administradores tienen acceso completo
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+        
+        # Verificar que el objeto pertenezca a la misma empresa del usuario
+        if hasattr(obj, 'empresa') and hasattr(request.user, 'empresa'):
+            return obj.empresa == request.user.empresa
+        
+        # Si el objeto es un User, verificar empresa
+        if hasattr(obj, 'empresa') and hasattr(request.user, 'empresa'):
+            return obj.empresa == request.user.empresa
+        
+        return False
+
+def require_permission(permission):
+    """
+    Decorador para asignar un permiso específico a una acción personalizada.
+    
+    Uso:
+        @action(detail=True, methods=['post'])
+        @require_permission('usuarios.change_user')
+        def activar(self, request, pk=None):
+            ...
+    """
+    def decorator(func):
+        func.permission_required = permission
+        return func
+    return decorator

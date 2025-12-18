@@ -1,0 +1,56 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Factura {{ factura.numero }} Creada{% endblock %}
+
+{% block content %}
+<h2>Nueva Factura Creada</h2>
+
+<div class="alert alert-success">
+    <strong>Factura #{{ factura.numero }}</strong> ha sido creada exitosamente.
+</div>
+
+<table>
+    <tr>
+        <th>Fecha:</th>
+        <td>{{ factura.fecha|date:"d/m/Y" }}</td>
+    </tr>
+    <tr>
+        <th>Cliente:</th>
+        <td>{{ factura.cliente.nombre }}</td>
+    </tr>
+    <tr>
+        <th>NCF:</th>
+        <td>{{ factura.ncf|default:"Sin NCF" }}</td>
+    </tr>
+    <tr>
+        <th>Subtotal:</th>
+        <td>RD$ {{ factura.subtotal|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <th>ITBIS:</th>
+        <td>RD$ {{ factura.itbis|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <th>Total:</th>
+        <td><strong>RD$ {{ factura.total|floatformat:2 }}</strong></td>
+    </tr>
+    <tr>
+        <th>Tipo de Venta:</th>
+        <td>{{ factura.tipo_venta }}</td>
+    </tr>
+    <tr>
+        <th>Estado:</th>
+        <td>{{ factura.estado }}</td>
+    </tr>
+</table>
+
+{% if factura.tipo_venta == 'CREDITO' %}
+<div class="alert alert-warning">
+    <strong>Venta a Crédito</strong><br>
+    Fecha de vencimiento: {{ factura.fecha_vencimiento|date:"d/m/Y"|default:"No especificada" }}
+</div>
+{% endif %}
+
+<p>Creado por: {{ factura.usuario_creacion.get_full_name|default:factura.usuario_creacion.username }}</p>
+
+{% endblock %}

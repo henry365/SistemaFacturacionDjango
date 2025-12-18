@@ -1,0 +1,50 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Alerta: Cuenta por Cobrar Vencida{% endblock %}
+
+{% block content %}
+<h2>Alerta de Cuenta por Cobrar Vencida</h2>
+
+<div class="alert alert-danger">
+    <strong>Cuenta por Cobrar Vencida</strong><br>
+    El cliente <strong>{{ cuenta.cliente.nombre }}</strong> tiene una cuenta vencida.
+</div>
+
+<table>
+    <tr>
+        <th>Factura:</th>
+        <td>{{ cuenta.factura.numero }}</td>
+    </tr>
+    <tr>
+        <th>Cliente:</th>
+        <td>{{ cuenta.cliente.nombre }}</td>
+    </tr>
+    <tr>
+        <th>Teléfono:</th>
+        <td>{{ cuenta.cliente.telefono|default:"No registrado" }}</td>
+    </tr>
+    <tr>
+        <th>Fecha de Vencimiento:</th>
+        <td>{{ cuenta.fecha_vencimiento|date:"d/m/Y" }}</td>
+    </tr>
+    <tr>
+        <th>Días Vencidos:</th>
+        <td><strong style="color: #c53030;">{{ dias_vencidos }} días</strong></td>
+    </tr>
+    <tr>
+        <th>Monto Original:</th>
+        <td>RD$ {{ cuenta.monto_original|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <th>Monto Cobrado:</th>
+        <td>RD$ {{ cuenta.monto_cobrado|floatformat:2 }}</td>
+    </tr>
+    <tr>
+        <th>Monto Pendiente:</th>
+        <td><strong style="color: #c53030;">RD$ {{ cuenta.monto_pendiente|floatformat:2 }}</strong></td>
+    </tr>
+</table>
+
+<p>Se recomienda contactar al cliente para gestionar el cobro.</p>
+
+{% endblock %}

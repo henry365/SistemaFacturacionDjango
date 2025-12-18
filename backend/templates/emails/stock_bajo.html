@@ -1,0 +1,45 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Alerta: Stock Bajo de Productos{% endblock %}
+
+{% block content %}
+<h2>Alerta de Stock Bajo</h2>
+
+<div class="alert alert-warning">
+    <strong>Atención:</strong> Los siguientes productos tienen stock bajo y requieren reabastecimiento.
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Código</th>
+            <th>Producto</th>
+            <th>Almacén</th>
+            <th>Stock Actual</th>
+            <th>Stock Mínimo</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in productos %}
+        <tr>
+            <td>{{ item.producto.codigo }}</td>
+            <td>{{ item.producto.nombre }}</td>
+            <td>{{ item.almacen.nombre }}</td>
+            <td style="color: {% if item.cantidad_disponible <= 0 %}#c53030{% else %}#dd6b20{% endif %};">
+                <strong>{{ item.cantidad_disponible|floatformat:0 }}</strong>
+            </td>
+            <td>{{ item.stock_minimo|floatformat:0 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="5">No hay productos con stock bajo.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<p><strong>Total de productos con stock bajo:</strong> {{ productos|length }}</p>
+
+<p>Se recomienda generar órdenes de compra para reabastecer estos productos.</p>
+
+{% endblock %}
