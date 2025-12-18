@@ -34,8 +34,5 @@ class Migration(migrations.Migration):
             name='tipo_activo',
             field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='activos', to='activos.tipoactivo'),
         ),
-        migrations.AlterUniqueTogether(
-            name='activofijo',
-            unique_together={('codigo_interno',)},
-        ),
+        # Removed redundant unique_together for codigo_interno - field already has unique=True
     ]

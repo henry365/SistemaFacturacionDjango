@@ -4,43 +4,6 @@ from django.conf import settings
 import django.db.models.deletion
 
 
-def drop_old_constraints(apps, schema_editor):
-    """Drop old unique constraints if they exist."""
-    if schema_editor.connection.vendor == 'postgresql':
-        # Try to drop the unique_together constraint
-        schema_editor.execute("""
-            DO $$
-            BEGIN
-                -- Drop unique_together constraint if exists
-                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'activos_activofijo_codigo_interno_key') THEN
-                    ALTER TABLE activos_activofijo DROP CONSTRAINT activos_activofijo_codigo_interno_key;
-                END IF;
-                -- Drop unique index if exists
-                DROP INDEX IF EXISTS activos_activofijo_codigo_interno_key;
-                DROP INDEX IF EXISTS activos_activofijo_codigo_interno_a1b2c3d4_uniq;
-            EXCEPTION WHEN others THEN
-                NULL;
-            END $$;
-        """)
-    elif schema_editor.connection.vendor == 'sqlite':
-        # SQLite doesn't support dropping constraints easily, but the new constraint will work
-        pass
-
-
-def drop_old_tipoactivo_constraint(apps, schema_editor):
-    """Drop old unique constraint on TipoActivo.nombre if exists."""
-    if schema_editor.connection.vendor == 'postgresql':
-        schema_editor.execute("""
-            DO $$
-            BEGIN
-                DROP INDEX IF EXISTS activos_tipoactivo_nombre_key;
-                DROP INDEX IF EXISTS activos_tipoactivo_nombre_a1b2c3d4_uniq;
-            EXCEPTION WHEN others THEN
-                NULL;
-            END $$;
-        """)
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -78,22 +41,9 @@ class Migration(migrations.Migration):
             name='fecha_actualizacion',
             field=models.DateTimeField(auto_now=True, null=True),
         ),
-        # Drop old constraint first using RunPython
-        migrations.RunPython(drop_old_tipoactivo_constraint, migrations.RunPython.noop),
-        # Use SeparateDatabaseAndState for TipoActivo unique_together
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
-                migrations.AlterUniqueTogether(
-                    name='tipoactivo',
-                    unique_together={('empresa', 'nombre')},
-                ),
-            ],
-            database_operations=[
-                migrations.RunSQL(
-                    sql="CREATE UNIQUE INDEX IF NOT EXISTS activos_tipoactivo_empresa_nombre_uniq ON activos_tipoactivo (empresa_id, nombre);",
-                    reverse_sql="DROP INDEX IF EXISTS activos_tipoactivo_empresa_nombre_uniq;",
-                ),
-            ],
+        migrations.AlterUniqueTogether(
+            name='tipoactivo',
+            unique_together={('empresa', 'nombre')},
         ),
         migrations.AlterModelOptions(
             name='tipoactivo',
@@ -133,13 +83,14 @@ class Migration(migrations.Migration):
                 to=settings.AUTH_USER_MODEL
             ),
         ),
-        # Drop old constraints before modifying the field
-        migrations.RunPython(drop_old_constraints, migrations.RunPython.noop),
-        # Remove unique=True from codigo_interno
+        # Remove unique=True from codigo_interno and add unique_together with empresa
         migrations.AlterField(
             model_name='activofijo',
             name='codigo_interno',
-            field=models.CharField(help_text='Codigo de etiqueta / Placa de inventario', max_length=50),
+            field=models.CharField(
+                help_text='Codigo de etiqueta / Placa de inventario',
+                max_length=50
+            ),
         ),
         migrations.AlterField(
             model_name='activofijo',
@@ -157,24 +108,17 @@ class Migration(migrations.Migration):
                 max_length=20
             ),
         ),
-        # Use SeparateDatabaseAndState for ActivoFijo unique_together
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
-                migrations.AlterUniqueTogether(
-                    name='activofijo',
-                    unique_together={('empresa', 'codigo_interno')},
-                ),
-            ],
-            database_operations=[
-                migrations.RunSQL(
-                    sql="CREATE UNIQUE INDEX IF NOT EXISTS activos_activofijo_empresa_codigo_uniq ON activos_activofijo (empresa_id, codigo_interno);",
-                    reverse_sql="DROP INDEX IF EXISTS activos_activofijo_empresa_codigo_uniq;",
-                ),
-            ],
+        migrations.AlterUniqueTogether(
+            name='activofijo',
+            unique_together={('empresa', 'codigo_interno')},
         ),
         migrations.AlterModelOptions(
             name='activofijo',
-            options={'ordering': ['-fecha_creacion'], 'verbose_name': 'Activo Fijo', 'verbose_name_plural': 'Activos Fijos'},
+            options={
+                'ordering': ['-fecha_creacion'],
+                'verbose_name': 'Activo Fijo',
+                'verbose_name_plural': 'Activos Fijos'
+            },
         ),
 
         # Depreciacion - Add audit fields
@@ -204,6 +148,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterModelOptions(
             name='depreciacion',
-            options={'ordering': ['-fecha'], 'verbose_name': 'Depreciacion', 'verbose_name_plural': 'Depreciaciones'},
+            options={
+                'ordering': ['-fecha'],
+                'verbose_name': 'Depreciacion',
+                'verbose_name_plural': 'Depreciaciones'
+            },
         ),
     ]
