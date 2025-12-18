@@ -6,10 +6,27 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.pagination import PageNumberPagination
 from django.db import transaction
 from decimal import Decimal
 
 from core.mixins import EmpresaFilterMixin
+
+
+class ActivosPagination(PageNumberPagination):
+    """Paginación personalizada para activos fijos"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class DepreciacionPagination(PageNumberPagination):
+    """Paginación personalizada para depreciaciones"""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
 from .models import TipoActivo, ActivoFijo, Depreciacion
 from .serializers import (
     TipoActivoSerializer,
@@ -36,6 +53,7 @@ class TipoActivoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     queryset = TipoActivo.objects.all()
     serializer_class = TipoActivoSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = ActivosPagination
     filterset_fields = ['activo']
     search_fields = ['nombre', 'descripcion']
     ordering_fields = ['nombre', 'porcentaje_depreciacion_anual']
@@ -69,6 +87,7 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         'usuario_modificacion'
     ).all()
     permission_classes = [IsAuthenticated]
+    pagination_class = ActivosPagination
     filterset_fields = ['tipo_activo', 'estado', 'ubicacion_fisica']
     search_fields = ['codigo_interno', 'nombre', 'marca', 'modelo', 'serial']
     ordering_fields = ['codigo_interno', 'nombre', 'fecha_adquisicion', 'valor_adquisicion']
@@ -268,6 +287,7 @@ class DepreciacionViewSet(viewsets.ReadOnlyModelViewSet):
     ).all()
     serializer_class = DepreciacionSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = DepreciacionPagination
     filterset_fields = ['activo', 'fecha']
     ordering_fields = ['fecha']
     ordering = ['-fecha']

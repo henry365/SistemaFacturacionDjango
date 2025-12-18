@@ -415,3 +415,318 @@ class ActivoFijoAPITest(APITestCase):
         """Test: Sin autenticacion recibe 401"""
         response = self.client.get('/api/v1/activos/activos/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ========== TESTS DE VALIDACIONES DE NEGOCIO ==========
+
+class TipoActivoValidacionesTest(TestCase):
+    """Tests para validaciones del modelo TipoActivo"""
+
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+
+    def test_porcentaje_negativo_error(self):
+        """Test: Error al crear tipo con porcentaje negativo"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            TipoActivo.objects.create(
+                empresa=self.empresa,
+                nombre='Test',
+                porcentaje_depreciacion_anual=Decimal('-10.00'),
+                vida_util_anos=5
+            )
+
+    def test_porcentaje_mayor_100_error(self):
+        """Test: Error al crear tipo con porcentaje mayor a 100"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            TipoActivo.objects.create(
+                empresa=self.empresa,
+                nombre='Test',
+                porcentaje_depreciacion_anual=Decimal('150.00'),
+                vida_util_anos=5
+            )
+
+    def test_vida_util_cero_error(self):
+        """Test: Error al crear tipo con vida util cero"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            TipoActivo.objects.create(
+                empresa=self.empresa,
+                nombre='Test',
+                porcentaje_depreciacion_anual=Decimal('25.00'),
+                vida_util_anos=0
+            )
+
+    def test_vida_util_negativa_error(self):
+        """Test: Error al crear tipo con vida util negativa"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            TipoActivo.objects.create(
+                empresa=self.empresa,
+                nombre='Test',
+                porcentaje_depreciacion_anual=Decimal('25.00'),
+                vida_util_anos=-5
+            )
+
+
+class ActivoFijoValidacionesTest(TestCase):
+    """Tests para validaciones del modelo ActivoFijo"""
+
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+        self.tipo = TipoActivo.objects.create(
+            empresa=self.empresa,
+            nombre='Vehiculos',
+            porcentaje_depreciacion_anual=Decimal('25.00'),
+            vida_util_anos=4
+        )
+
+    def test_valor_adquisicion_negativo_error(self):
+        """Test: Error al crear activo con valor de adquisicion negativo"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            ActivoFijo.objects.create(
+                empresa=self.empresa,
+                tipo_activo=self.tipo,
+                codigo_interno='VEH-001',
+                nombre='Test',
+                fecha_adquisicion=date.today(),
+                valor_adquisicion=Decimal('-50000.00'),
+                valor_libro_actual=Decimal('50000.00')
+            )
+
+    def test_valor_libro_negativo_error(self):
+        """Test: Error al crear activo con valor libro negativo"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            ActivoFijo.objects.create(
+                empresa=self.empresa,
+                tipo_activo=self.tipo,
+                codigo_interno='VEH-001',
+                nombre='Test',
+                fecha_adquisicion=date.today(),
+                valor_adquisicion=Decimal('50000.00'),
+                valor_libro_actual=Decimal('-1000.00')
+            )
+
+    def test_valor_libro_mayor_adquisicion_error(self):
+        """Test: Error si valor libro es mayor al valor de adquisicion"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            ActivoFijo.objects.create(
+                empresa=self.empresa,
+                tipo_activo=self.tipo,
+                codigo_interno='VEH-001',
+                nombre='Test',
+                fecha_adquisicion=date.today(),
+                valor_adquisicion=Decimal('50000.00'),
+                valor_libro_actual=Decimal('60000.00')
+            )
+
+    def test_fecha_adquisicion_futura_error(self):
+        """Test: Error si fecha de adquisicion es futura"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            ActivoFijo.objects.create(
+                empresa=self.empresa,
+                tipo_activo=self.tipo,
+                codigo_interno='VEH-001',
+                nombre='Test',
+                fecha_adquisicion=date.today() + timedelta(days=30),
+                valor_adquisicion=Decimal('50000.00'),
+                valor_libro_actual=Decimal('50000.00')
+            )
+
+    def test_tipo_activo_otra_empresa_error(self):
+        """Test: Error si tipo_activo pertenece a otra empresa"""
+        from django.core.exceptions import ValidationError
+        otra_empresa = Empresa.objects.create(
+            nombre='Otra Empresa',
+            rnc='987654321'
+        )
+        tipo_otra = TipoActivo.objects.create(
+            empresa=otra_empresa,
+            nombre='Mobiliario',
+            porcentaje_depreciacion_anual=Decimal('10.00'),
+            vida_util_anos=10
+        )
+        with self.assertRaises(ValidationError):
+            ActivoFijo.objects.create(
+                empresa=self.empresa,
+                tipo_activo=tipo_otra,
+                codigo_interno='MOB-001',
+                nombre='Test',
+                fecha_adquisicion=date.today(),
+                valor_adquisicion=Decimal('5000.00'),
+                valor_libro_actual=Decimal('5000.00')
+            )
+
+
+class DepreciacionValidacionesTest(TestCase):
+    """Tests para validaciones del modelo Depreciacion"""
+
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+        self.tipo = TipoActivo.objects.create(
+            empresa=self.empresa,
+            nombre='Vehiculos',
+            porcentaje_depreciacion_anual=Decimal('25.00'),
+            vida_util_anos=4
+        )
+        self.activo = ActivoFijo.objects.create(
+            empresa=self.empresa,
+            tipo_activo=self.tipo,
+            codigo_interno='VEH-001',
+            nombre='Toyota Corolla',
+            fecha_adquisicion=date.today() - timedelta(days=365),
+            valor_adquisicion=Decimal('50000.00'),
+            valor_libro_actual=Decimal('50000.00')
+        )
+
+    def test_valor_libro_nuevo_negativo_error(self):
+        """Test: Error si valor libro nuevo es negativo"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            Depreciacion.objects.create(
+                activo=self.activo,
+                fecha=date.today(),
+                monto=Decimal('1000.00'),
+                valor_libro_anterior=Decimal('50000.00'),
+                valor_libro_nuevo=Decimal('-100.00')
+            )
+
+    def test_monto_negativo_error(self):
+        """Test: Error si monto de depreciacion es negativo"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            Depreciacion.objects.create(
+                activo=self.activo,
+                fecha=date.today(),
+                monto=Decimal('-1000.00'),
+                valor_libro_anterior=Decimal('50000.00'),
+                valor_libro_nuevo=Decimal('51000.00')
+            )
+
+    def test_inconsistencia_valores_error(self):
+        """Test: Error si valores no son consistentes (nuevo != anterior - monto)"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            Depreciacion.objects.create(
+                activo=self.activo,
+                fecha=date.today(),
+                monto=Decimal('1000.00'),
+                valor_libro_anterior=Decimal('50000.00'),
+                valor_libro_nuevo=Decimal('45000.00')  # Deberia ser 49000
+            )
+
+    def test_fecha_anterior_adquisicion_error(self):
+        """Test: Error si fecha es anterior a fecha de adquisicion"""
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            Depreciacion.objects.create(
+                activo=self.activo,
+                fecha=self.activo.fecha_adquisicion - timedelta(days=30),
+                monto=Decimal('1000.00'),
+                valor_libro_anterior=Decimal('50000.00'),
+                valor_libro_nuevo=Decimal('49000.00')
+            )
+
+
+# ========== TESTS DE SERVICIOS ==========
+
+class DepreciacionServiceTest(TestCase):
+    """Tests para el servicio de depreciacion"""
+
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+        self.tipo = TipoActivo.objects.create(
+            empresa=self.empresa,
+            nombre='Vehiculos',
+            porcentaje_depreciacion_anual=Decimal('25.00'),
+            vida_util_anos=4
+        )
+        self.user = User.objects.create_user(
+            username='testuser',
+            password='test123',
+            empresa=self.empresa
+        )
+        self.activo = ActivoFijo.objects.create(
+            empresa=self.empresa,
+            tipo_activo=self.tipo,
+            codigo_interno='VEH-001',
+            nombre='Toyota Corolla',
+            fecha_adquisicion=date.today() - timedelta(days=365),
+            valor_adquisicion=Decimal('48000.00'),
+            valor_libro_actual=Decimal('48000.00')
+        )
+
+    def test_calcular_depreciacion_mensual_linea_recta(self):
+        """Test: Calculo de depreciacion mensual metodo linea recta"""
+        from .services import DepreciacionService
+        monto = DepreciacionService.calcular_depreciacion_mensual(
+            self.activo,
+            metodo='linea_recta'
+        )
+        # 48000 * (25/12/100) = 1000
+        self.assertEqual(monto, Decimal('1000.00'))
+
+    def test_puede_depreciar_activo_activo(self):
+        """Test: Puede depreciar activo en estado ACTIVO"""
+        from .services import DepreciacionService
+        puede, error = DepreciacionService.puede_depreciar(self.activo)
+        self.assertTrue(puede)
+        self.assertIsNone(error)
+
+    def test_no_puede_depreciar_activo_vendido(self):
+        """Test: No puede depreciar activo VENDIDO"""
+        from .services import DepreciacionService
+        self.activo.estado = 'VENDIDO'
+        self.activo.save(update_fields=['estado'])
+        puede, error = DepreciacionService.puede_depreciar(self.activo)
+        self.assertFalse(puede)
+        self.assertIsNotNone(error)
+
+    def test_no_puede_depreciar_valor_libro_cero(self):
+        """Test: No puede depreciar activo con valor libro 0"""
+        from .services import DepreciacionService
+        self.activo.valor_libro_actual = Decimal('0')
+        self.activo.save(update_fields=['valor_libro_actual'])
+        puede, error = DepreciacionService.puede_depreciar(self.activo)
+        self.assertFalse(puede)
+
+    def test_registrar_depreciacion(self):
+        """Test: Registrar depreciacion via servicio"""
+        from .services import DepreciacionService
+        depreciacion, error = DepreciacionService.registrar_depreciacion(
+            activo=self.activo,
+            fecha=date.today(),
+            usuario=self.user,
+            observacion='Test de depreciacion'
+        )
+        self.assertIsNotNone(depreciacion)
+        self.assertIsNone(error)
+        self.assertEqual(depreciacion.monto, Decimal('1000.00'))
+
+    def test_calcular_proyeccion_depreciacion(self):
+        """Test: Calcular proyeccion de depreciaciones"""
+        from .services import DepreciacionService
+        proyeccion = DepreciacionService.calcular_proyeccion_depreciacion(
+            self.activo,
+            meses=12,
+            metodo='linea_recta'
+        )
+        self.assertEqual(len(proyeccion), 12)
+        self.assertEqual(proyeccion[0]['monto_depreciacion'], Decimal('1000.00'))
