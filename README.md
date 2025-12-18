@@ -1,5 +1,7 @@
 # Sistema de Facturación Django + Next.js
 
+[![Django Tests](https://github.com/henry365/SistemaFacturacionDjango/actions/workflows/tests.yml/badge.svg)](https://github.com/henry365/SistemaFacturacionDjango/actions/workflows/tests.yml)
+
 Sistema de facturación completo para República Dominicana.
 
 ## Estructura del Proyecto
