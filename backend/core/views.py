@@ -4,10 +4,10 @@ Views para el módulo de Configuración del Sistema.
 Este módulo expone la API REST para gestionar la configuración
 de empresa con permisos estrictos (solo administradores).
 """
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 
 from .models import ConfiguracionEmpresa
@@ -18,18 +18,22 @@ from .serializers import (
     ActualizarSeccionSerializer,
 )
 from .config import get_config_defaults
+from core.permissions.mixins import AdminStaffMixin
 
 
-class IsAdminRole(IsAdminUser):
+class IsAdminRole(AdminStaffMixin, permissions.BasePermission):
     """
     Permiso que verifica si el usuario tiene rol 'admin' o es staff/superuser.
+
+    Usa AdminStaffMixin de core.permissions para la verificación de admin/staff.
     """
+
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Superusers y staff siempre tienen acceso
-        if request.user.is_superuser or request.user.is_staff:
+        # Superusers y staff siempre tienen acceso (usando mixin)
+        if self._is_admin_or_staff(request.user):
             return True
 
         # Verificar rol 'admin'

@@ -354,3 +354,439 @@ class ResponsableValidationMixinTest(TestCase):
         obj = Mock(spec=[])  # Sin campo responsable
 
         self.assertFalse(self.mixin._is_responsable(obj, user))
+
+
+# =============================================================================
+# Tests para Utilidades (utils.py)
+# =============================================================================
+
+from .utils import (
+    check_permission,
+    check_empresa_permission,
+    user_has_any_permission,
+    user_has_all_permissions,
+    belongs_to_same_empresa,
+    require_permission,
+    require_same_empresa,
+    create_mock_request,
+    get_cached_permission,
+    log_permission_check,
+    get_user_permissions_summary,
+)
+
+
+class CheckPermissionTest(TestCase):
+    """Tests para check_permission()"""
+
+    def test_unauthenticated_user_returns_false(self):
+        """Test: Usuario no autenticado retorna False"""
+        user = Mock(is_authenticated=False)
+        self.assertFalse(check_permission(user, 'test.perm'))
+
+    def test_none_user_returns_false(self):
+        """Test: Usuario None retorna False"""
+        self.assertFalse(check_permission(None, 'test.perm'))
+
+    def test_superuser_returns_true(self):
+        """Test: Superusuario siempre retorna True"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=True,
+            is_staff=False
+        )
+        self.assertTrue(check_permission(user, 'test.perm'))
+
+    def test_staff_returns_true(self):
+        """Test: Staff siempre retorna True"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=True
+        )
+        self.assertTrue(check_permission(user, 'test.perm'))
+
+    def test_user_with_permission_returns_true(self):
+        """Test: Usuario con permiso retorna True"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perm = Mock(return_value=True)
+
+        self.assertTrue(check_permission(user, 'test.perm'))
+        user.has_perm.assert_called_with('test.perm')
+
+    def test_user_without_permission_returns_false(self):
+        """Test: Usuario sin permiso retorna False"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perm = Mock(return_value=False)
+
+        self.assertFalse(check_permission(user, 'test.perm'))
+
+
+class CheckEmpresaPermissionTest(TestCase):
+    """Tests para check_empresa_permission()"""
+
+    def test_superuser_bypass_empresa_check(self):
+        """Test: Superusuario bypasea verificación de empresa"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=True,
+            is_staff=False,
+            empresa=Mock()
+        )
+        obj = Mock(empresa=Mock())  # Diferente empresa
+
+        self.assertTrue(check_empresa_permission(user, obj, 'test.perm'))
+
+    def test_same_empresa_with_permission(self):
+        """Test: Misma empresa con permiso retorna True"""
+        empresa = Mock()
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False,
+            empresa=empresa
+        )
+        user.has_perm = Mock(return_value=True)
+        obj = Mock(empresa=empresa)
+
+        self.assertTrue(check_empresa_permission(user, obj, 'test.perm'))
+
+    def test_different_empresa_returns_false(self):
+        """Test: Diferente empresa retorna False"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False,
+            empresa=Mock()
+        )
+        user.has_perm = Mock(return_value=True)
+        obj = Mock(empresa=Mock())
+
+        self.assertFalse(check_empresa_permission(user, obj, 'test.perm'))
+
+
+class UserHasAnyPermissionTest(TestCase):
+    """Tests para user_has_any_permission()"""
+
+    def test_superuser_returns_true(self):
+        """Test: Superusuario siempre retorna True"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=True,
+            is_staff=False
+        )
+        perms = ['test.perm1', 'test.perm2']
+
+        self.assertTrue(user_has_any_permission(user, perms))
+
+    def test_has_one_of_many(self):
+        """Test: Tiene uno de varios permisos"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perm = Mock(side_effect=[False, True])
+
+        perms = ['test.perm1', 'test.perm2']
+        self.assertTrue(user_has_any_permission(user, perms))
+
+    def test_has_none_of_many(self):
+        """Test: No tiene ninguno de los permisos"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perm = Mock(return_value=False)
+
+        perms = ['test.perm1', 'test.perm2']
+        self.assertFalse(user_has_any_permission(user, perms))
+
+
+class UserHasAllPermissionsTest(TestCase):
+    """Tests para user_has_all_permissions()"""
+
+    def test_superuser_returns_true(self):
+        """Test: Superusuario siempre retorna True"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=True,
+            is_staff=False
+        )
+        perms = ['test.perm1', 'test.perm2']
+
+        self.assertTrue(user_has_all_permissions(user, perms))
+
+    def test_has_all_permissions(self):
+        """Test: Tiene todos los permisos"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perms = Mock(return_value=True)
+
+        perms = ['test.perm1', 'test.perm2']
+        self.assertTrue(user_has_all_permissions(user, perms))
+        user.has_perms.assert_called_with(perms)
+
+    def test_missing_some_permissions(self):
+        """Test: Faltan algunos permisos"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False
+        )
+        user.has_perms = Mock(return_value=False)
+
+        perms = ['test.perm1', 'test.perm2']
+        self.assertFalse(user_has_all_permissions(user, perms))
+
+
+class BelongsToSameEmpresaTest(TestCase):
+    """Tests para belongs_to_same_empresa()"""
+
+    def test_same_empresa(self):
+        """Test: Misma empresa retorna True"""
+        empresa = Mock()
+        obj = Mock(empresa=empresa)
+        user = Mock(empresa=empresa)
+
+        self.assertTrue(belongs_to_same_empresa(obj, user))
+
+    def test_different_empresa(self):
+        """Test: Diferente empresa retorna False"""
+        obj = Mock(empresa=Mock())
+        user = Mock(empresa=Mock())
+
+        self.assertFalse(belongs_to_same_empresa(obj, user))
+
+    def test_obj_without_empresa_field(self):
+        """Test: Objeto sin campo empresa retorna False"""
+        obj = Mock(spec=[])
+        user = Mock(empresa=Mock())
+
+        self.assertFalse(belongs_to_same_empresa(obj, user))
+
+    def test_user_without_empresa_field(self):
+        """Test: Usuario sin campo empresa retorna False"""
+        obj = Mock(empresa=Mock())
+        user = Mock(spec=['is_authenticated'])
+
+        self.assertFalse(belongs_to_same_empresa(obj, user))
+
+    def test_null_empresa(self):
+        """Test: Empresa nula retorna False"""
+        obj = Mock(empresa=None)
+        user = Mock(empresa=Mock())
+
+        self.assertFalse(belongs_to_same_empresa(obj, user))
+
+
+class RequirePermissionDecoratorTest(TestCase):
+    """Tests para require_permission decorator"""
+
+    def test_decorator_sets_permission_required(self):
+        """Test: Decorador asigna permission_required"""
+        @require_permission('test.perm')
+        def my_action(self, request):
+            pass
+
+        self.assertEqual(my_action.permission_required, 'test.perm')
+
+    def test_decorator_preserves_function(self):
+        """Test: Decorador preserva la función"""
+        @require_permission('test.perm')
+        def my_action(self, request):
+            return 'result'
+
+        self.assertEqual(my_action(None, None), 'result')
+
+
+class RequireSameEmpresaDecoratorTest(TestCase):
+    """Tests para require_same_empresa decorator"""
+
+    def test_superuser_bypasses_check(self):
+        """Test: Superusuario bypasea verificación"""
+        @require_same_empresa
+        def my_action(self, request):
+            return 'result'
+
+        mock_self = Mock()
+        mock_self.get_object = Mock(return_value=Mock(empresa=Mock()))
+        mock_request = Mock()
+        mock_request.user = Mock(
+            is_superuser=True,
+            is_staff=False
+        )
+
+        result = my_action(mock_self, mock_request)
+        self.assertEqual(result, 'result')
+
+    def test_same_empresa_allowed(self):
+        """Test: Misma empresa permite ejecución"""
+        @require_same_empresa
+        def my_action(self, request):
+            return 'result'
+
+        empresa = Mock()
+        mock_self = Mock()
+        mock_self.get_object = Mock(return_value=Mock(empresa=empresa))
+        mock_request = Mock()
+        mock_request.user = Mock(
+            is_superuser=False,
+            is_staff=False,
+            empresa=empresa
+        )
+
+        result = my_action(mock_self, mock_request)
+        self.assertEqual(result, 'result')
+
+    def test_different_empresa_raises_permission_denied(self):
+        """Test: Diferente empresa lanza PermissionDenied"""
+        from rest_framework.exceptions import PermissionDenied
+
+        @require_same_empresa
+        def my_action(self, request):
+            return 'result'
+
+        mock_self = Mock()
+        mock_self.get_object = Mock(return_value=Mock(empresa=Mock()))
+        mock_request = Mock()
+        mock_request.user = Mock(
+            is_superuser=False,
+            is_staff=False,
+            empresa=Mock()  # Diferente empresa
+        )
+
+        with self.assertRaises(PermissionDenied):
+            my_action(mock_self, mock_request)
+
+
+class CreateMockRequestTest(TestCase):
+    """Tests para create_mock_request()"""
+
+    def test_creates_get_request(self):
+        """Test: Crea request GET"""
+        user = Mock(is_authenticated=True)
+        request = create_mock_request(user, method='GET')
+
+        self.assertEqual(request.user, user)
+        self.assertEqual(request.method, 'GET')
+
+    def test_creates_post_request(self):
+        """Test: Crea request POST"""
+        user = Mock(is_authenticated=True)
+        request = create_mock_request(user, method='POST')
+
+        self.assertEqual(request.user, user)
+        self.assertEqual(request.method, 'POST')
+
+
+class GetCachedPermissionTest(TestCase):
+    """Tests para get_cached_permission()"""
+
+    def test_unauthenticated_returns_false(self):
+        """Test: Usuario no autenticado retorna False"""
+        user = Mock(is_authenticated=False)
+        self.assertFalse(get_cached_permission(user, 'test.perm'))
+
+    def test_superuser_returns_true_without_cache(self):
+        """Test: Superusuario retorna True sin usar caché"""
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=True,
+            is_staff=False,
+            pk=1
+        )
+        self.assertTrue(get_cached_permission(user, 'test.perm'))
+
+    def test_caches_permission_result(self):
+        """Test: Cachea resultado de permiso"""
+        from django.core.cache import cache
+
+        user = Mock(
+            is_authenticated=True,
+            is_superuser=False,
+            is_staff=False,
+            pk=1
+        )
+        user.has_perm = Mock(return_value=True)
+
+        # Primera llamada - debería consultar y cachear
+        result1 = get_cached_permission(user, 'test.perm')
+        self.assertTrue(result1)
+
+        # Verificar que se guardó en caché
+        cache_key = f"perm:{user.pk}:test.perm"
+        cached_value = cache.get(cache_key)
+        self.assertTrue(cached_value)
+
+        # Limpiar
+        cache.delete(cache_key)
+
+
+class GetUserPermissionsSummaryTest(TestCase):
+    """Tests para get_user_permissions_summary()"""
+
+    def test_unauthenticated_user(self):
+        """Test: Usuario no autenticado"""
+        user = Mock(is_authenticated=False)
+        summary = get_user_permissions_summary(user)
+
+        self.assertFalse(summary['is_authenticated'])
+        self.assertEqual(summary['direct_permissions'], [])
+
+    def test_none_user(self):
+        """Test: Usuario None"""
+        summary = get_user_permissions_summary(None)
+
+        self.assertFalse(summary['is_authenticated'])
+
+    def test_superuser_summary_with_real_user(self):
+        """Test: Resumen de superusuario con usuario real"""
+        # Crear un usuario real para evitar problemas con Mock y queries
+        user = User.objects.create_superuser(
+            username='testsuperuser',
+            email='super@test.com',
+            password='testpass123'
+        )
+
+        summary = get_user_permissions_summary(user)
+
+        self.assertTrue(summary['is_authenticated'])
+        self.assertTrue(summary['is_superuser'])
+        self.assertIn('direct_permissions', summary)
+        self.assertIn('group_permissions', summary)
+        self.assertIn('all_permissions', summary)
+        self.assertIn('groups', summary)
+
+        # Cleanup
+        user.delete()
+
+    def test_regular_user_summary(self):
+        """Test: Resumen de usuario regular"""
+        user = User.objects.create_user(
+            username='testregular',
+            email='regular@test.com',
+            password='testpass123'
+        )
+
+        summary = get_user_permissions_summary(user)
+
+        self.assertTrue(summary['is_authenticated'])
+        self.assertFalse(summary['is_superuser'])
+        self.assertFalse(summary['is_staff'])
+        self.assertIsInstance(summary['direct_permissions'], list)
+        self.assertIsInstance(summary['group_permissions'], list)
+
+        # Cleanup
+        user.delete()
