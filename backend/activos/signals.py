@@ -7,6 +7,7 @@ Estas señales automatizan comportamientos del sistema:
 - Logging de cambios importantes
 """
 import logging
+from decimal import Decimal
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
@@ -48,7 +49,7 @@ def activo_post_save(sender, instance, created, **kwargs):
         )
 
         # Alerta si se crea con valor_libro muy bajo (menos del 10%)
-        if instance.valor_libro_actual < (instance.valor_adquisicion * 0.1):
+        if instance.valor_libro_actual < (instance.valor_adquisicion * Decimal('0.1')):
             logger.warning(
                 f"Activo {instance.codigo_interno} creado con valor libro muy bajo: "
                 f"{instance.valor_libro_actual} de {instance.valor_adquisicion}"

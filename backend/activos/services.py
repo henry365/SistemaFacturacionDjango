@@ -5,10 +5,13 @@ Este módulo contiene la lógica de negocio separada de las vistas,
 facilitando la testabilidad y mantenibilidad.
 """
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple
 from django.db import transaction
 from django.core.exceptions import ValidationError
+
+# Constante para redondeo monetario a 2 decimales
+DECIMAL_PLACES = Decimal('0.01')
 
 from .models import ActivoFijo, Depreciacion, TipoActivo
 from .constants import (
@@ -74,6 +77,9 @@ class DepreciacionService:
             monto = activo.valor_libro_actual * tasa_mensual
         else:
             raise ValueError(f'Método de depreciación no válido: {metodo}')
+
+        # Redondear a 2 decimales para precisión monetaria
+        monto = monto.quantize(DECIMAL_PLACES, rounding=ROUND_HALF_UP)
 
         # No depreciar más del valor libro actual
         return min(monto, activo.valor_libro_actual)
@@ -179,8 +185,12 @@ class DepreciacionService:
             else:
                 monto = valor_libro * tasa_mensual
 
+            # Redondear a 2 decimales para precisión monetaria
+            monto = monto.quantize(DECIMAL_PLACES, rounding=ROUND_HALF_UP)
             monto = min(monto, valor_libro)
-            valor_libro_nuevo = valor_libro - monto
+            valor_libro_nuevo = (valor_libro - monto).quantize(
+                DECIMAL_PLACES, rounding=ROUND_HALF_UP
+            )
 
             proyeccion.append({
                 'mes': mes,

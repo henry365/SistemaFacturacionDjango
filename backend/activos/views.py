@@ -5,12 +5,11 @@ import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from django.db import transaction
-from decimal import Decimal
 
 from core.mixins import EmpresaFilterMixin
+from .services import DepreciacionService, ActivoFijoService
 
 
 class ActivosPagination(PageNumberPagination):
@@ -76,6 +75,7 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     - POST /api/v1/activos/activos/{id}/depreciar/ - Registra depreciacion
     - GET /api/v1/activos/activos/{id}/historial_depreciacion/ - Historial
     - POST /api/v1/activos/activos/{id}/cambiar_estado/ - Cambia estado
+    - GET /api/v1/activos/activos/{id}/proyeccion_depreciacion/ - Proyeccion
     - GET /api/v1/activos/activos/por_estado/ - Resumen por estado
     - GET /api/v1/activos/activos/por_tipo/ - Resumen por tipo
     """
@@ -165,55 +165,22 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         fecha = serializer.validated_data['fecha']
         observacion = serializer.validated_data.get('observacion', '')
 
-        # Verificar que no exista depreciacion para esa fecha
-        if Depreciacion.objects.filter(activo=activo, fecha=fecha).exists():
-            return Response(
-                {'error': 'Ya existe una depreciacion para esta fecha.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Verificar que el activo pueda depreciarse
-        if activo.valor_libro_actual <= 0:
-            return Response(
-                {'error': 'El activo ya esta totalmente depreciado.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Calcular depreciacion usando metodo de linea recta (DGII RD)
-        # Nota: Se usa valor_adquisicion para linea recta (depreciacion constante)
-        # Si se requiere metodo de saldos decrecientes, usar valor_libro_actual
-        tasa_mensual = activo.tipo_activo.porcentaje_depreciacion_anual / Decimal('12') / Decimal('100')
-        monto_depreciacion = activo.valor_adquisicion * tasa_mensual
-        # Asegurar que no se deprecie mas del valor libro actual
-        monto_depreciacion = min(monto_depreciacion, activo.valor_libro_actual)
-
-        valor_libro_anterior = activo.valor_libro_actual
-        valor_libro_nuevo = valor_libro_anterior - monto_depreciacion
-
-        with transaction.atomic():
-            depreciacion = Depreciacion.objects.create(
-                activo=activo,
-                fecha=fecha,
-                monto=monto_depreciacion,
-                valor_libro_anterior=valor_libro_anterior,
-                valor_libro_nuevo=valor_libro_nuevo,
-                observacion=observacion,
-                usuario_creacion=request.user
-            )
-
-            # Actualizar estado si esta totalmente depreciado
-            # Usar valor_libro_nuevo en lugar de activo.valor_libro_actual
-            # porque el objeto en memoria no se ha refrescado
-            if valor_libro_nuevo <= 0:
-                activo.refresh_from_db()
-                activo.estado = 'DEPRECIADO'
-                activo.save(update_fields=['estado'])
-
-        # Log de operacion critica
-        logger.info(
-            f"Depreciacion registrada: Activo {activo.codigo_interno}, "
-            f"Monto {monto_depreciacion}, Usuario {request.user.username}"
+        # Usar el servicio para registrar la depreciación
+        depreciacion, error = DepreciacionService.registrar_depreciacion(
+            activo=activo,
+            fecha=fecha,
+            usuario=request.user,
+            observacion=observacion
         )
+
+        if error:
+            return Response(
+                {'error': error},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Refrescar el activo para obtener valores actualizados
+        activo.refresh_from_db()
 
         return Response({
             'depreciacion': DepreciacionSerializer(depreciacion).data,
@@ -250,25 +217,52 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         activo = self.get_object()
         nuevo_estado = request.data.get('estado')
 
-        estados_validos = [e[0] for e in ActivoFijo.ESTADO_CHOICES]
-        if nuevo_estado not in estados_validos:
+        # Usar el servicio para cambiar el estado
+        exito, error = ActivoFijoService.cambiar_estado(
+            activo=activo,
+            nuevo_estado=nuevo_estado,
+            usuario=request.user
+        )
+
+        if not exito:
             return Response(
-                {'error': f'Estado invalido. Opciones: {estados_validos}'},
+                {'error': error},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        estado_anterior = activo.estado
-        activo.estado = nuevo_estado
-        activo.usuario_modificacion = request.user
-        activo.save()
+        return Response(ActivoFijoSerializer(activo).data)
 
-        # Log de cambio de estado
-        logger.info(
-            f"Cambio de estado: Activo {activo.codigo_interno}, "
-            f"{estado_anterior} -> {nuevo_estado}, Usuario {request.user.username}"
+    @action(detail=True, methods=['get'])
+    def proyeccion_depreciacion(self, request, pk=None):
+        """
+        Calcula una proyección de depreciaciones futuras para el activo.
+
+        Query params:
+            - meses: Número de meses a proyectar (default: 12, max: 120)
+
+        Returns:
+            Lista de proyecciones mensuales con monto y valores libro.
+        """
+        activo = self.get_object()
+
+        # Obtener número de meses del query param
+        try:
+            meses = int(request.query_params.get('meses', 12))
+            meses = min(max(meses, 1), 120)  # Entre 1 y 120 meses
+        except ValueError:
+            meses = 12
+
+        proyeccion = DepreciacionService.calcular_proyeccion_depreciacion(
+            activo=activo,
+            meses=meses
         )
 
-        return Response(ActivoFijoSerializer(activo).data)
+        return Response({
+            'activo': activo.codigo_interno,
+            'valor_libro_actual': activo.valor_libro_actual,
+            'meses_proyectados': len(proyeccion),
+            'proyeccion': proyeccion
+        })
 
 
 class DepreciacionViewSet(viewsets.ReadOnlyModelViewSet):

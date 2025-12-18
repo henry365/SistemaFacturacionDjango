@@ -128,12 +128,14 @@ class ActivoFijo(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='activos_creados'
     )
     usuario_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='activos_modificados'
     )
 
@@ -206,6 +208,7 @@ class Depreciacion(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='depreciaciones_creadas'
     )
 
