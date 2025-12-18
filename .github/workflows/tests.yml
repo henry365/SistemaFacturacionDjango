@@ -1,0 +1,110 @@
+name: Django Tests
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
+      DJANGO_SETTINGS_MODULE: core.settings
+      SECRET_KEY: test-secret-key-for-ci
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          python manage.py test --verbosity=2
+
+      - name: Run tests with coverage
+        working-directory: backend
+        run: |
+          pip install coverage
+          coverage run --source='.' manage.py test
+          coverage report -m
+          coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 isort black
+
+      - name: Check code formatting with Black
+        working-directory: backend
+        run: |
+          black --check --diff .
+        continue-on-error: true
+
+      - name: Check import sorting with isort
+        working-directory: backend
+        run: |
+          isort --check-only --diff .
+        continue-on-error: true
+
+      - name: Lint with flake8
+        working-directory: backend
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
