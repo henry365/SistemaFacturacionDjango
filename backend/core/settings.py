@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import dj_database_url
 
 load_dotenv()
 
@@ -61,6 +62,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # CORS first
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Static files in production
     'django.middleware.csp.ContentSecurityPolicyMiddleware',  # CSP - Django 6.0
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -100,8 +102,15 @@ DATABASES = {
     }
 }
 
-# Override with PostgreSQL if configured
-if os.getenv('DB_NAME'):
+# Override with DATABASE_URL (Railway, Heroku, etc.)
+if os.getenv('DATABASE_URL'):
+    DATABASES['default'] = dj_database_url.config(
+        default=os.getenv('DATABASE_URL'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+# Override with PostgreSQL if configured via individual vars
+elif os.getenv('DB_NAME'):
     DATABASES['default'] = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME'),
@@ -147,6 +156,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
@@ -181,6 +192,21 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
 ]
+
+# Production CORS/CSRF (Railway, custom domains)
+RAILWAY_STATIC_URL = os.getenv('RAILWAY_STATIC_URL', '')
+if RAILWAY_STATIC_URL:
+    CORS_ALLOWED_ORIGINS.append(RAILWAY_STATIC_URL)
+    CSRF_TRUSTED_ORIGINS = [RAILWAY_STATIC_URL]
+    ALLOWED_HOSTS.append(RAILWAY_STATIC_URL.replace('https://', '').replace('http://', ''))
+
+# Allow any .railway.app subdomain
+if not DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^https://.*\.railway\.app$",
+    ]
+    CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS if 'CSRF_TRUSTED_ORIGINS' in dir() else []
+    CSRF_TRUSTED_ORIGINS.append("https://*.railway.app")
 
 # =============================================================================
 # DJANGO 6.0 - Content Security Policy (CSP)

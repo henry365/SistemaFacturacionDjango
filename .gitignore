@@ -137,6 +137,7 @@ nul
 # Static files (if collected)
 staticfiles/
 static_collected/
+backend/staticfiles/
 
 # Media files
 media/
