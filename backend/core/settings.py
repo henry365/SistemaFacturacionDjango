@@ -78,7 +78,6 @@ except ImportError:
     pass
 
 MIDDLEWARE += [
-    'django.middleware.csp.ContentSecurityPolicyMiddleware',  # CSP - Django 6.0
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -228,26 +227,6 @@ if not DEBUG:
     ]
     CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS if 'CSRF_TRUSTED_ORIGINS' in dir() else []
     CSRF_TRUSTED_ORIGINS.append("https://*.railway.app")
-
-# =============================================================================
-# DJANGO 6.0 - Content Security Policy (CSP)
-# =============================================================================
-from django.utils.csp import CSP
-
-SECURE_CSP = {
-    "default-src": [CSP.SELF],
-    "script-src": [CSP.SELF],
-    "style-src": [CSP.SELF, CSP.UNSAFE_INLINE],  # unsafe-inline para estilos admin
-    "img-src": [CSP.SELF, "data:", "https:"],
-    "font-src": [CSP.SELF],
-    "connect-src": [CSP.SELF],
-    "frame-ancestors": [CSP.NONE],
-}
-
-# CSP Report-Only mode for development (no blocking, just reports)
-if DEBUG:
-    SECURE_CSP_REPORT_ONLY = SECURE_CSP.copy()
-    SECURE_CSP = None  # Don't enforce in development
 
 # =============================================================================
 # HTTPS/SSL Security Settings (Production)
