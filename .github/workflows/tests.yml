@@ -57,13 +57,13 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: |
-          python manage.py test --verbosity=2
+          python manage.py test compras inventario dgii --verbosity=2
 
       - name: Run tests with coverage
         working-directory: backend
         run: |
           pip install coverage
-          coverage run --source='.' manage.py test
+          coverage run --source='.' manage.py test compras inventario dgii
           coverage report -m
           coverage xml
 
