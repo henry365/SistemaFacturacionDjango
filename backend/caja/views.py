@@ -15,6 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
+from usuarios.permissions import ActionBasedPermission
 
 from .models import Caja, SesionCaja, MovimientoCaja
 from .serializers import (
@@ -99,7 +100,7 @@ class CajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, views
         'usuario_creacion',
         'usuario_modificacion'
     ).all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = CajaPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['activa']
@@ -230,7 +231,7 @@ class SesionCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
         'usuario_creacion',
         'usuario_modificacion'
     ).prefetch_related('movimientos').all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = SesionCajaPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['caja', 'usuario', 'estado']
@@ -404,7 +405,7 @@ class MovimientoCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMi
         'usuario_creacion',
         'usuario_modificacion'
     ).all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = MovimientoCajaPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['sesion', 'tipo_movimiento', 'usuario']

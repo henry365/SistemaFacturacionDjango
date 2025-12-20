@@ -30,6 +30,7 @@ from .permissions import (
 )
 from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from usuarios.permissions import ActionBasedPermission
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class ListaEsperaProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempote
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarListaEspera()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarListaEspera()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -129,8 +130,8 @@ class CotizacionClienteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotenc
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarCotizacion()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarCotizacion()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -188,8 +189,8 @@ class FacturaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, vi
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarFactura()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarFactura()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -247,8 +248,8 @@ class PagoCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarPagoCaja()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarPagoCaja()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -307,8 +308,8 @@ class NotaCreditoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarNotaCredito()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarNotaCredito()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -366,8 +367,8 @@ class NotaDebitoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarNotaDebito()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarNotaDebito()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""
@@ -425,8 +426,8 @@ class DevolucionVentaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyM
     def get_permissions(self):
         """Permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarDevolucionVenta()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarDevolucionVenta()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usar serializer optimizado para listados."""

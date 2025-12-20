@@ -43,6 +43,7 @@ from .constants import (
     ERROR_COLUMNAS_FALTANTES
 )
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from usuarios.permissions import ActionBasedPermission
 
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,8 @@ class CategoriaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, 
         Retorna los permisos requeridos según la acción.
         """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarCategoria()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarCategoria()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """
@@ -160,10 +161,10 @@ class ProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
         Retorna los permisos requeridos según la acción.
         """
         if self.action == 'upload_catalog':
-            return [permissions.IsAuthenticated(), CanCargarCatalogo()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanCargarCatalogo()]
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarProducto()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarProducto()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """
@@ -376,8 +377,8 @@ class ImagenProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMi
         Retorna los permisos requeridos según la acción.
         """
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'marcar_principal', 'reordenar']:
-            return [permissions.IsAuthenticated(), CanGestionarImagenes()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarImagenes()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """
@@ -507,8 +508,8 @@ class ReferenciasCruzadasViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempote
         Retorna los permisos requeridos según la acción.
         """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarReferencias()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarReferencias()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """

@@ -46,6 +46,7 @@ from .permissions import (
 )
 from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from usuarios.permissions import ActionBasedPermission
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,8 @@ class AlmacenViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, vi
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarAlmacen()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarAlmacen()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -137,8 +138,8 @@ class InventarioProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempoten
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarInventario()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarInventario()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -175,10 +176,10 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action == 'kardex':
-            return [permissions.IsAuthenticated(), CanVerKardex()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanVerKardex()]
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarMovimientos()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarMovimientos()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -359,8 +360,8 @@ class ReservaStockViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'confirmar', 'cancelar']:
-            return [permissions.IsAuthenticated(), CanGestionarReservas()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarReservas()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_queryset(self):
         """Filtrar reservas según empresa del usuario."""
@@ -426,8 +427,8 @@ class LoteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, views
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarLotes()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarLotes()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -481,8 +482,8 @@ class AlertaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'resolver', 'generar_alertas']:
-            return [permissions.IsAuthenticated(), CanGestionarAlertas()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarAlertas()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -574,7 +575,7 @@ class DetalleTransferenciaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
-        return [permissions.IsAuthenticated(), CanGestionarTransferencias()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarTransferencias()]
 
     def get_queryset(self):
         """Filtra por empresa de la transferencia."""
@@ -613,8 +614,8 @@ class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'enviar', 'recibir']:
-            return [permissions.IsAuthenticated(), CanGestionarTransferencias()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarTransferencias()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -746,7 +747,7 @@ class DetalleAjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
-        return [permissions.IsAuthenticated(), CanGestionarAjustes()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarAjustes()]
 
     def get_queryset(self):
         """Filtra por empresa del ajuste."""
@@ -785,10 +786,10 @@ class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['aprobar', 'rechazar']:
-            return [permissions.IsAuthenticated(), CanAprobarAjustes()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanAprobarAjustes()]
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'procesar']:
-            return [permissions.IsAuthenticated(), CanGestionarAjustes()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarAjustes()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""
@@ -924,7 +925,7 @@ class DetalleConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempote
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
-        return [permissions.IsAuthenticated(), CanGestionarConteos()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarConteos()]
 
     def get_queryset(self):
         """Filtra por empresa del conteo."""
@@ -963,8 +964,8 @@ class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
     def get_permissions(self):
         """Aplica permisos según la acción."""
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'iniciar', 'finalizar', 'ajustar']:
-            return [permissions.IsAuthenticated(), CanGestionarConteos()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarConteos()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Retorna serializer optimizado para listado."""

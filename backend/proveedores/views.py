@@ -17,6 +17,7 @@ from .permissions import CanGestionarProveedor
 from .services import ServicioProveedor
 from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from usuarios.permissions import ActionBasedPermission
 
 
 logger = logging.getLogger(__name__)
@@ -65,8 +66,8 @@ class ProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, 
         Retorna los permisos requeridos según la acción.
         """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarProveedor()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarProveedor()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """

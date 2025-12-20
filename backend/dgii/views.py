@@ -18,6 +18,7 @@ import csv
 import io
 
 from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
+from usuarios.permissions import ActionBasedPermission
 from .models import TipoComprobante, SecuenciaNCF
 from .serializers import (
     TipoComprobanteSerializer, TipoComprobanteListSerializer,
@@ -112,8 +113,8 @@ class TipoComprobanteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyM
     def get_permissions(self):
         """Aplica permisos según la acción"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), CanGestionarTipoComprobante()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGestionarTipoComprobante()]
+        return [IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usa serializer optimizado para listados"""
@@ -178,10 +179,10 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
     def get_permissions(self):
         """Aplica permisos según la acción"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), CanGestionarSecuencia()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGestionarSecuencia()]
         if self.action in ['generar_ncf', 'generar_por_tipo']:
-            return [IsAuthenticated(), CanGenerarNCF()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGenerarNCF()]
+        return [IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """Usa serializer optimizado para listados"""
@@ -397,12 +398,12 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
     def get_permissions(self):
         """Aplica permisos según la acción"""
         if self.action in ['formato_606', 'formato_606_async']:
-            return [IsAuthenticated(), CanGenerarReporte606()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGenerarReporte606()]
         if self.action in ['formato_607', 'formato_607_async']:
-            return [IsAuthenticated(), CanGenerarReporte607()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGenerarReporte607()]
         if self.action in ['formato_608', 'formato_608_async']:
-            return [IsAuthenticated(), CanGenerarReporte608()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGenerarReporte608()]
+        return [IsAuthenticated(), ActionBasedPermission()]
 
     def _paginate_registros(self, request, registros):
         """

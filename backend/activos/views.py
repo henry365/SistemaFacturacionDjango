@@ -13,6 +13,7 @@ from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 
 from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
+from usuarios.permissions import ActionBasedPermission
 from .services import DepreciacionService, ActivoFijoService
 from .permissions import (
     CanDepreciarActivo, CanCambiarEstadoActivo, CanVerProyeccion,
@@ -77,8 +78,8 @@ class TipoActivoViewSet(EmpresaFilterMixin, IdempotencyMixin, viewsets.ModelView
     def get_permissions(self):
         """Aplica permisos según la acción"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), CanGestionarTipoActivo()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGestionarTipoActivo()]
+        return [IsAuthenticated(), ActionBasedPermission()]
 
     def perform_create(self, serializer):
         """Crea tipo de activo asignando empresa del usuario"""
@@ -147,14 +148,14 @@ class ActivoFijoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
     def get_permissions(self):
         """Aplica permisos según la acción"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAuthenticated(), CanGestionarActivoFijo()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanGestionarActivoFijo()]
         if self.action == 'depreciar':
-            return [IsAuthenticated(), CanDepreciarActivo()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanDepreciarActivo()]
         if self.action == 'cambiar_estado':
-            return [IsAuthenticated(), CanCambiarEstadoActivo()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanCambiarEstadoActivo()]
         if self.action == 'proyeccion_depreciacion':
-            return [IsAuthenticated(), CanVerProyeccion()]
-        return [IsAuthenticated()]
+            return [IsAuthenticated(), ActionBasedPermission(), CanVerProyeccion()]
+        return [IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -366,7 +367,7 @@ class DepreciacionViewSet(viewsets.ReadOnlyModelViewSet):
         'usuario_creacion'
     ).all()
     serializer_class = DepreciacionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = DepreciacionPagination
     filterset_fields = ['activo', 'fecha']
     ordering_fields = ['fecha']

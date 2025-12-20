@@ -18,6 +18,7 @@ from .permissions import CanGestionarVendedor
 from .services import ServicioVendedor
 from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from usuarios.permissions import ActionBasedPermission
 
 
 logger = logging.getLogger(__name__)
@@ -68,8 +69,8 @@ class VendedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
         Retorna los permisos requeridos según la acción.
         """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), CanGestionarVendedor()]
-        return [permissions.IsAuthenticated()]
+            return [permissions.IsAuthenticated(), ActionBasedPermission(), CanGestionarVendedor()]
+        return [permissions.IsAuthenticated(), ActionBasedPermission()]
 
     def get_serializer_class(self):
         """
