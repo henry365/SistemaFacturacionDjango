@@ -7,6 +7,9 @@ django-filter>=23.5
 # Autenticación JWT
 djangorestframework-simplejwt>=5.3.0
 
+# Background Tasks (Django 6.0)
+django-tasks>=0.10.0
+
 # Base de datos
 psycopg2-binary>=2.9.9
 

@@ -44,6 +44,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework_simplejwt',
     'django_filters',  # Para filtros avanzados
+    'django_tasks',  # Django 6.0 background tasks
+    'django_tasks.backends.database',  # Database backend for production
 
     # Local apps
     'core.apps.CoreConfig',  # Configuración del sistema
@@ -336,9 +338,20 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Sistema Facturacion <norep
 # Django 6.0 - Background Tasks Configuration
 # =============================================================================
 # ImmediateBackend: ejecuta tareas sincrónicamente (útil para desarrollo/testing)
-# En producción, considerar usar un backend con cola como Redis
-TASKS = {
-    'default': {
-        'BACKEND': 'django.tasks.backends.immediate.ImmediateBackend',
+# DatabaseBackend: almacena tareas en BD y las ejecuta con db_worker (producción)
+
+if DEBUG:
+    # Development: execute tasks synchronously
+    TASKS = {
+        'default': {
+            'BACKEND': 'django.tasks.backends.immediate.ImmediateBackend',
+        }
     }
-}
+else:
+    # Production: store tasks in database, execute with db_worker command
+    TASKS = {
+        'default': {
+            'BACKEND': 'django_tasks.backends.database.DatabaseBackend',
+            'QUEUES': ['default', 'emails', 'reports'],
+        }
+    }
