@@ -1,8 +1,16 @@
+"""
+ViewSets para el módulo de Compras
+
+Este módulo implementa los ViewSets para todos los modelos del módulo de compras,
+siguiendo los estándares de la Guía Inicial.
+"""
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
 from django.db import transaction
+from django_filters.rest_framework import DjangoFilterBackend
 from .models import (
     SolicitudCotizacionProveedor,
     OrdenCompra,
@@ -40,8 +48,70 @@ from usuarios.permissions import ActionBasedPermission
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
 
 
+# ============================================================
+# PAGINACION
+# ============================================================
+
+class ComprasPagination(PageNumberPagination):
+    """Paginación personalizada para Compras"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class OrdenesCompraPagination(PageNumberPagination):
+    """Paginación personalizada para Órdenes de Compra"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class GastosPagination(PageNumberPagination):
+    """Paginación personalizada para Gastos"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class RecepcionesPagination(PageNumberPagination):
+    """Paginación personalizada para Recepciones"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class DevolucionesPagination(PageNumberPagination):
+    """Paginación personalizada para Devoluciones"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class LiquidacionesPagination(PageNumberPagination):
+    """Paginación personalizada para Liquidaciones"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+# ============================================================
+# VIEWSETS
+# ============================================================
+
 class SolicitudCotizacionProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    queryset = SolicitudCotizacionProveedor.objects.all()
+    """
+    ViewSet para gestión de solicitudes de cotización a proveedores.
+
+    Endpoints:
+        GET /solicitudes-cotizacion/ - Listar solicitudes
+        POST /solicitudes-cotizacion/ - Crear solicitud
+        GET /solicitudes-cotizacion/{id}/ - Detalle de solicitud
+        PUT/PATCH /solicitudes-cotizacion/{id}/ - Actualizar solicitud
+        DELETE /solicitudes-cotizacion/{id}/ - Eliminar solicitud
+    """
+    queryset = SolicitudCotizacionProveedor.objects.select_related(
+        'empresa', 'proveedor', 'usuario_creacion', 'usuario_modificacion'
+    ).all()
     serializer_class = SolicitudCotizacionProveedorSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -65,10 +135,28 @@ class SolicitudCotizacionProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin,
 
 
 class OrdenCompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    queryset = OrdenCompra.objects.all()
+    """
+    ViewSet para gestión de órdenes de compra.
+
+    Endpoints:
+        GET /ordenes-compra/ - Listar órdenes
+        POST /ordenes-compra/ - Crear orden
+        GET /ordenes-compra/{id}/ - Detalle de orden
+        PUT/PATCH /ordenes-compra/{id}/ - Actualizar orden
+        DELETE /ordenes-compra/{id}/ - Eliminar orden
+        POST /ordenes-compra/{id}/aprobar/ - Aprobar orden
+        POST /ordenes-compra/{id}/enviar/ - Marcar como enviada
+        POST /ordenes-compra/{id}/recibir/ - Registrar recepción
+        POST /ordenes-compra/{id}/cancelar/ - Cancelar orden
+    """
+    queryset = OrdenCompra.objects.select_related(
+        'empresa', 'proveedor', 'usuario_creacion', 'usuario_aprobacion', 'usuario_modificacion'
+    ).prefetch_related('detalles').all()
     serializer_class = OrdenCompraSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = OrdenesCompraPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'proveedor']
     search_fields = ['proveedor__nombre', 'observaciones']
     ordering_fields = ['fecha_emision', 'estado', 'total']
     ordering = ['-fecha_emision']
@@ -169,10 +257,26 @@ class OrdenCompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
 
 
 class CompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    queryset = Compra.objects.all()
+    """
+    ViewSet para gestión de compras.
+
+    Endpoints:
+        GET /compras/ - Listar compras
+        POST /compras/ - Registrar compra
+        GET /compras/{id}/ - Detalle de compra
+        PUT/PATCH /compras/{id}/ - Actualizar compra
+        DELETE /compras/{id}/ - Eliminar compra
+        POST /compras/{id}/procesar/ - Procesar y registrar inventario
+        POST /compras/{id}/anular/ - Anular compra
+    """
+    queryset = Compra.objects.select_related(
+        'empresa', 'proveedor', 'orden_compra', 'usuario_creacion', 'usuario_modificacion'
+    ).prefetch_related('detalles', 'retenciones').all()
     serializer_class = CompraSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = ComprasPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'proveedor', 'tipo_gasto']
     search_fields = ['proveedor__nombre', 'numero_factura_proveedor', 'numero_ncf']
     ordering_fields = ['fecha_compra', 'fecha_registro', 'total', 'estado']
     ordering = ['-fecha_registro']
@@ -251,10 +355,25 @@ class CompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, vie
 
 
 class GastoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    queryset = Gasto.objects.all()
+    """
+    ViewSet para gestión de gastos operativos.
+
+    Endpoints:
+        GET /gastos/ - Listar gastos
+        POST /gastos/ - Registrar gasto
+        GET /gastos/{id}/ - Detalle de gasto
+        PUT/PATCH /gastos/{id}/ - Actualizar gasto
+        DELETE /gastos/{id}/ - Eliminar gasto
+        POST /gastos/{id}/marcar_pagado/ - Marcar como pagado
+    """
+    queryset = Gasto.objects.select_related(
+        'empresa', 'proveedor', 'usuario_creacion', 'usuario_modificacion'
+    ).all()
     serializer_class = GastoSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = GastosPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'categoria', 'proveedor']
     search_fields = ['descripcion', 'categoria', 'numero_factura', 'proveedor__nombre']
     ordering_fields = ['fecha_gasto', 'fecha_creacion', 'total', 'estado']
     ordering = ['-fecha_gasto']
@@ -298,11 +417,27 @@ class GastoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, view
 
 
 class RecepcionCompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    """ViewSet para gestión de recepciones de compra"""
-    queryset = RecepcionCompra.objects.all()
+    """
+    ViewSet para gestión de recepciones de compra.
+
+    Endpoints:
+        GET /recepciones-compra/ - Listar recepciones
+        POST /recepciones-compra/ - Crear recepción
+        GET /recepciones-compra/{id}/ - Detalle de recepción
+        PUT/PATCH /recepciones-compra/{id}/ - Actualizar recepción
+        DELETE /recepciones-compra/{id}/ - Eliminar recepción
+        POST /recepciones-compra/{id}/confirmar/ - Confirmar y actualizar inventario
+        POST /recepciones-compra/{id}/cancelar/ - Cancelar recepción
+    """
+    queryset = RecepcionCompra.objects.select_related(
+        'empresa', 'orden_compra', 'orden_compra__proveedor', 'almacen',
+        'usuario_creacion', 'usuario_modificacion'
+    ).prefetch_related('detalles').all()
     serializer_class = RecepcionCompraSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = RecepcionesPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'orden_compra', 'almacen']
     search_fields = ['numero_recepcion', 'orden_compra__proveedor__nombre', 'observaciones']
     ordering_fields = ['fecha_recepcion', 'estado']
     ordering = ['-fecha_recepcion']
@@ -425,11 +560,26 @@ class RecepcionCompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyM
 
 
 class DevolucionProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    """ViewSet para gestión de devoluciones a proveedores"""
-    queryset = DevolucionProveedor.objects.all()
+    """
+    ViewSet para gestión de devoluciones a proveedores.
+
+    Endpoints:
+        GET /devoluciones-proveedor/ - Listar devoluciones
+        POST /devoluciones-proveedor/ - Crear devolución
+        GET /devoluciones-proveedor/{id}/ - Detalle de devolución
+        PUT/PATCH /devoluciones-proveedor/{id}/ - Actualizar devolución
+        DELETE /devoluciones-proveedor/{id}/ - Eliminar devolución
+        POST /devoluciones-proveedor/{id}/confirmar/ - Confirmar y procesar inventario
+        POST /devoluciones-proveedor/{id}/cancelar/ - Cancelar devolución
+    """
+    queryset = DevolucionProveedor.objects.select_related(
+        'empresa', 'proveedor', 'compra', 'usuario_creacion', 'usuario_modificacion'
+    ).prefetch_related('detalles').all()
     serializer_class = DevolucionProveedorSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = DevolucionesPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'proveedor', 'motivo']
     search_fields = ['numero_devolucion', 'proveedor__nombre', 'descripcion_motivo']
     ordering_fields = ['fecha', 'estado', 'total']
     ordering = ['-fecha']
@@ -553,11 +703,27 @@ class DevolucionProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempote
 
 
 class LiquidacionImportacionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    """ViewSet para gestión de liquidaciones de importación"""
-    queryset = LiquidacionImportacion.objects.all()
+    """
+    ViewSet para gestión de liquidaciones de importación.
+
+    Endpoints:
+        GET /liquidaciones-importacion/ - Listar liquidaciones
+        POST /liquidaciones-importacion/ - Crear liquidación
+        GET /liquidaciones-importacion/{id}/ - Detalle de liquidación
+        PUT/PATCH /liquidaciones-importacion/{id}/ - Actualizar liquidación
+        DELETE /liquidaciones-importacion/{id}/ - Eliminar liquidación
+        POST /liquidaciones-importacion/{id}/liquidar/ - Procesar liquidación
+        POST /liquidaciones-importacion/{id}/cancelar/ - Cancelar liquidación
+        POST /liquidaciones-importacion/{id}/agregar_gasto/ - Agregar gasto
+    """
+    queryset = LiquidacionImportacion.objects.select_related(
+        'empresa', 'compra', 'compra__proveedor', 'usuario_creacion', 'usuario_modificacion'
+    ).prefetch_related('gastos').all()
     serializer_class = LiquidacionImportacionSerializer
     permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = LiquidacionesPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'incoterm', 'compra']
     search_fields = ['numero_liquidacion', 'compra__numero_factura_proveedor', 'compra__proveedor__nombre']
     ordering_fields = ['fecha', 'estado', 'total_cif']
     ordering = ['-fecha']
@@ -695,10 +861,20 @@ class LiquidacionImportacionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idemp
 # =============================================================================
 
 class TipoRetencionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
-    """ViewSet para gestionar tipos de retención fiscal"""
-    queryset = TipoRetencion.objects.all()
+    """
+    ViewSet para gestionar tipos de retención fiscal.
+
+    Endpoints:
+        GET /tipos-retencion/ - Listar tipos
+        POST /tipos-retencion/ - Crear tipo
+        GET /tipos-retencion/{id}/ - Detalle de tipo
+        PUT/PATCH /tipos-retencion/{id}/ - Actualizar tipo
+        DELETE /tipos-retencion/{id}/ - Eliminar tipo
+    """
+    queryset = TipoRetencion.objects.select_related('empresa').all()
     serializer_class = TipoRetencionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['categoria', 'activo', 'aplica_a_persona_fisica', 'aplica_a_persona_juridica']
     search_fields = ['codigo', 'nombre']
     ordering_fields = ['codigo', 'nombre', 'porcentaje']

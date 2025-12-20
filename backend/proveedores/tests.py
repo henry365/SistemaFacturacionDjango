@@ -199,6 +199,19 @@ class ProveedorAPITest(APITestCase):
             perm = Permission.objects.get(codename=codename, content_type=content_type)
             self.user.user_permissions.add(perm)
 
+        # Asignar permiso personalizado de gestionar_proveedor
+        try:
+            perm_gestionar = Permission.objects.get(
+                codename='gestionar_proveedor',
+                content_type=content_type
+            )
+            self.user.user_permissions.add(perm_gestionar)
+        except Permission.DoesNotExist:
+            pass
+
+        # Refrescar usuario para limpiar cache de permisos
+        self.user = User.objects.get(pk=self.user.pk)
+
         self.proveedor = Proveedor.objects.create(
             empresa=self.empresa,
             nombre='Proveedor Test',

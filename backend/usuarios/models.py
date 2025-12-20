@@ -1,27 +1,52 @@
+import re
+import uuid as uuid_lib
 from django.contrib.auth.models import AbstractUser, Group
+from django.conf import settings
 from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
 from django.core.exceptions import ValidationError
+
+from .constants import ROL_CHOICES, ROL_DEFAULT, ROL_ADMIN
+
 
 class User(AbstractUser):
     """
     Modelo de usuario personalizado.
-    Se pueden agregar campos adicionales aquí si es necesario.
+
+    Incluye campos adicionales para roles, empresa y auditoría.
     """
-    ROLES = (
-        ('admin', 'Administrador'),
-        ('facturador', 'Facturador'),
-        ('cajero', 'Cajero'),
-        ('almacen', 'Almacén'),
-        ('compras', 'Compras'),
-        ('contabilidad', 'Contabilidad'),
-    )
-    
-    rol = models.CharField(max_length=20, choices=ROLES, default='facturador', db_index=True)
+    # Identificador único
+    uuid = models.UUIDField(default=uuid_lib.uuid4, editable=False, unique=True)
+
+    # Campos de negocio
+    rol = models.CharField(max_length=20, choices=ROL_CHOICES, default=ROL_DEFAULT, db_index=True)
     telefono = models.CharField(max_length=20, blank=True, null=True)
-    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT, related_name='usuarios', null=True, blank=True, db_index=True, help_text="Empresa a la que pertenece el usuario")
-    
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.PROTECT,
+        related_name='usuarios',
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Empresa a la que pertenece el usuario"
+    )
+
+    # Campos de auditoría adicionales (date_joined y last_login vienen de AbstractUser)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+    usuario_creacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='usuarios_creados'
+    )
+    usuario_modificacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='usuarios_modificados'
+    )
+
     class Meta:
         verbose_name = 'Usuario'
         verbose_name_plural = 'Usuarios'
@@ -32,39 +57,66 @@ class User(AbstractUser):
         ]
 
     def clean(self):
-        """Validaciones a nivel de modelo"""
+        """
+        Validaciones de negocio para User.
+
+        Valida:
+        - Username no vacío
+        - Email normalizado y único por empresa
+        - Teléfono con formato válido
+        """
+        errors = {}
+
+        # Validar username
         if self.username:
             self.username = self.username.strip()
             if not self.username:
-                raise ValidationError({'username': 'El nombre de usuario no puede estar vacío.'})
-        
+                errors['username'] = 'El nombre de usuario no puede estar vacío.'
+
+        # Validar y normalizar email
         if self.email:
             self.email = self.email.strip().lower()
-        
+            # Validar unicidad de email por empresa
+            if self.empresa:
+                qs = User.objects.filter(email=self.email, empresa=self.empresa)
+                if self.pk:
+                    qs = qs.exclude(pk=self.pk)
+                if qs.exists():
+                    errors['email'] = 'Ya existe un usuario con este correo en la empresa.'
+
+        # Validar teléfono
         if self.telefono:
             self.telefono = self.telefono.strip()
+            if not re.match(r'^[\d\s\-\(\)\+]+$', self.telefono):
+                errors['telefono'] = 'El teléfono contiene caracteres inválidos.'
+            telefono_sin_formato = re.sub(r'[\s\-\(\)\+]', '', self.telefono)
+            if len(telefono_sin_formato) < 10 or len(telefono_sin_formato) > 15:
+                errors['telefono'] = 'El teléfono debe tener entre 10 y 15 dígitos.'
+
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         return f"{self.username} - {self.get_rol_display()}"
 
     def save(self, *args, **kwargs):
-        self.full_clean()  # Llamar a clean() antes de guardar
-        if self.rol == 'admin':
-            self.is_staff = True
-        super().save(*args, **kwargs)
+        """
+        Guarda con validaciones completas.
 
-@receiver(post_save, sender=User)
-def asignar_grupo_por_rol(sender, instance, created, **kwargs):
-    """
-    Asigna automáticamente el usuario al grupo correspondiente a su rol.
-    Si el grupo no existe, intenta crearlo (aunque deberían crearse con setup_roles).
-    """
-    if instance.rol:
-        group_name = instance.rol # El nombre del grupo será igual al código del rol (admin, facturador, etc)
-        group, _ = Group.objects.get_or_create(name=group_name)
-        
-        # Limpiar grupos anteriores si cambió de rol (opcional, depende de la lógica de negocio)
-        # Aquí asumimos que el rol define su grupo principal.
-        current_groups = instance.groups.all()
-        if group not in current_groups:
-            instance.groups.add(group)
+        Maneja update_fields para evitar validaciones innecesarias en updates parciales.
+        """
+        # Ejecutar validaciones completas antes de guardar
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            # Incluso con update_fields, validar si se modifican campos críticos
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'rol', 'email', 'username']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
+        # Lógica de negocio: asignar is_staff si es admin
+        if self.rol == ROL_ADMIN:
+            self.is_staff = True
+
+        super().save(*args, **kwargs)

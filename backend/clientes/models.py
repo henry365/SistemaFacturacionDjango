@@ -1,9 +1,32 @@
+"""
+Modelos para el módulo de Clientes
+
+Este módulo contiene los modelos Cliente y CategoriaCliente,
+siguiendo los estándares de la Guía Inicial.
+"""
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from vendedores.models import Vendedor
 import uuid
+
+from .constants import (
+    TIPO_IDENTIFICACION_CHOICES,
+    TIPO_IDENTIFICACION_RNC,
+    TIPOS_REQUIEREN_NUMERO,
+    DESCUENTO_MIN,
+    DESCUENTO_MAX,
+    LIMITE_CREDITO_MIN,
+    ERROR_NOMBRE_VACIO,
+    ERROR_DESCUENTO_RANGO,
+    ERROR_LIMITE_CREDITO_NEGATIVO,
+    ERROR_NUMERO_IDENTIFICACION_REQUERIDO,
+    ERROR_CATEGORIA_OTRA_EMPRESA,
+    ERROR_VENDEDOR_OTRA_EMPRESA,
+    ERROR_CATEGORIA_DUPLICADA,
+    ERROR_CLIENTE_IDENTIFICACION_DUPLICADA,
+)
 
 class CategoriaCliente(models.Model):
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT, related_name='categorias_cliente', null=True, blank=True, db_index=True)
@@ -34,35 +57,96 @@ class CategoriaCliente(models.Model):
         ]
 
     def clean(self):
-        """Validaciones a nivel de modelo"""
+        """
+        Validaciones de negocio para CategoriaCliente.
+
+        CRÍTICO: Este método valida TODAS las reglas de negocio.
+        """
+        errors = {}
+
+        # ========== VALIDACIONES DE VALORES ==========
+
+        # Validar nombre no vacío
         if self.nombre:
             self.nombre = self.nombre.strip()
             if not self.nombre:
-                raise ValidationError({'nombre': 'El nombre no puede estar vacío.'})
-        
-        if self.descuento_porcentaje < 0 or self.descuento_porcentaje > 100:
-            raise ValidationError({'descuento_porcentaje': 'El descuento debe estar entre 0 y 100.'})
+                errors['nombre'] = ERROR_NOMBRE_VACIO
+        else:
+            errors['nombre'] = ERROR_NOMBRE_VACIO
+
+        # Validar rango de descuento
+        if self.descuento_porcentaje is not None:
+            if self.descuento_porcentaje < DESCUENTO_MIN or self.descuento_porcentaje > DESCUENTO_MAX:
+                errors['descuento_porcentaje'] = ERROR_DESCUENTO_RANGO
+
+        # ========== VALIDACIONES DE UNICIDAD ==========
+
+        # Validar unicidad de nombre por empresa
+        if self.nombre and self.empresa:
+            qs = CategoriaCliente.objects.filter(
+                nombre=self.nombre,
+                empresa=self.empresa
+            )
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                errors['nombre'] = ERROR_CATEGORIA_DUPLICADA
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda el modelo con validaciones.
+
+        CRÍTICO: Siempre ejecutar validaciones antes de guardar.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            # Validar si se actualizan campos críticos
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'descuento_porcentaje', 'nombre']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.nombre} ({self.empresa.nombre if self.empresa else 'Sin empresa'})"
 
+
 class Cliente(models.Model):
-    empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT, related_name='clientes', null=True, blank=True, db_index=True)
-    categoria = models.ForeignKey(CategoriaCliente, on_delete=models.SET_NULL, null=True, blank=True, related_name='clientes', db_index=True)
-    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    
-    TIPO_IDENTIFICACION_CHOICES = (
-        ('RNC', 'RNC'),
-        ('CEDULA', 'Cédula'),
-        ('PASAPORTE', 'Pasaporte'),
-        ('OTRO', 'Otro'),
+    """
+    Modelo para gestionar clientes de la empresa.
+
+    Incluye campos de identificación, contacto, crédito y relaciones
+    con categorías y vendedores.
+    """
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.PROTECT,
+        related_name='clientes',
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text='Empresa a la que pertenece el cliente'
     )
+    categoria = models.ForeignKey(
+        CategoriaCliente,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='clientes',
+        db_index=True
+    )
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
 
     nombre = models.CharField(max_length=200)
     tipo_identificacion = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=TIPO_IDENTIFICACION_CHOICES,
-        blank=True, 
+        blank=True,
         null=True,
         db_index=True
     )
@@ -106,29 +190,89 @@ class Cliente(models.Model):
         ]
 
     def clean(self):
-        """Validaciones a nivel de modelo"""
+        """
+        Validaciones de negocio para Cliente.
+
+        CRÍTICO: Este método valida TODAS las reglas de negocio.
+        """
+        errors = {}
+
+        # ========== VALIDACIONES DE VALORES ==========
+
+        # Validar nombre no vacío
         if self.nombre:
             self.nombre = self.nombre.strip()
             if not self.nombre:
-                raise ValidationError({'nombre': 'El nombre no puede estar vacío.'})
-        
-        # Validar que RNC requiere numero_identificacion
-        if self.tipo_identificacion == 'RNC' and not self.numero_identificacion:
-            raise ValidationError({'numero_identificacion': 'El número de identificación es obligatorio para RNC.'})
-        
+                errors['nombre'] = ERROR_NOMBRE_VACIO
+        else:
+            errors['nombre'] = ERROR_NOMBRE_VACIO
+
+        # Validar límite de crédito no negativo
+        if self.limite_credito is not None and self.limite_credito < LIMITE_CREDITO_MIN:
+            errors['limite_credito'] = ERROR_LIMITE_CREDITO_NEGATIVO
+
+        # ========== VALIDACIONES DE IDENTIFICACIÓN ==========
+
+        # Validar que tipos específicos requieren número de identificación
+        if self.tipo_identificacion in TIPOS_REQUIEREN_NUMERO:
+            if not self.numero_identificacion:
+                errors['numero_identificacion'] = ERROR_NUMERO_IDENTIFICACION_REQUERIDO.format(
+                    tipo=self.tipo_identificacion
+                )
+
+        # ========== VALIDACIONES DE RELACIONES ==========
+
         # Validar que categoria pertenezca a la misma empresa
-        if self.categoria and self.empresa and self.categoria.empresa != self.empresa:
-            raise ValidationError({'categoria': 'La categoría debe pertenecer a la misma empresa del cliente.'})
-        
+        if self.categoria and self.empresa:
+            if self.categoria.empresa and self.categoria.empresa != self.empresa:
+                errors['categoria'] = ERROR_CATEGORIA_OTRA_EMPRESA
+
         # Validar que vendedor pertenezca a la misma empresa
-        if self.vendedor_asignado and self.empresa and self.vendedor_asignado.empresa != self.empresa:
-            raise ValidationError({'vendedor_asignado': 'El vendedor debe pertenecer a la misma empresa del cliente.'})
-        
-        if self.limite_credito < 0:
-            raise ValidationError({'limite_credito': 'El límite de crédito no puede ser negativo.'})
-        
+        if self.vendedor_asignado and self.empresa:
+            if self.vendedor_asignado.empresa and self.vendedor_asignado.empresa != self.empresa:
+                errors['vendedor_asignado'] = ERROR_VENDEDOR_OTRA_EMPRESA
+
+        # ========== VALIDACIONES DE UNICIDAD ==========
+
+        # Validar unicidad de numero_identificacion por empresa
+        if self.numero_identificacion and self.empresa:
+            qs = Cliente.objects.filter(
+                numero_identificacion=self.numero_identificacion,
+                empresa=self.empresa
+            )
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                errors['numero_identificacion'] = ERROR_CLIENTE_IDENTIFICACION_DUPLICADA
+
+        # ========== NORMALIZACIÓN DE DATOS ==========
+
+        # Normalizar correo electrónico
         if self.correo_electronico:
             self.correo_electronico = self.correo_electronico.strip().lower()
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda el modelo con validaciones.
+
+        CRÍTICO: Siempre ejecutar validaciones antes de guardar.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            # Validar si se actualizan campos críticos
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = [
+                'empresa', 'categoria', 'vendedor_asignado',
+                'limite_credito', 'tipo_identificacion', 'numero_identificacion'
+            ]
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
+        super().save(*args, **kwargs)
 
     @property
     def tipo_identificacion_display(self):

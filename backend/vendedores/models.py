@@ -1,10 +1,39 @@
+"""
+Modelos para el módulo Vendedores
+
+Este módulo contiene los modelos para gestión de vendedores,
+sus datos de contacto, comisiones y relaciones con ventas.
+"""
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 import uuid
 
+from .constants import (
+    COMISION_MIN,
+    COMISION_MAX,
+    ERROR_NOMBRE_VACIO,
+    ERROR_COMISION_RANGO,
+    ERROR_USUARIO_EMPRESA_DIFERENTE,
+)
+
+
 class Vendedor(models.Model):
+    """
+    Modelo para gestionar vendedores del sistema.
+
+    Attributes:
+        empresa: Empresa a la que pertenece el vendedor (multi-tenancy)
+        uuid: Identificador único universal
+        nombre: Nombre completo del vendedor
+        cedula: Número de cédula (único por empresa)
+        telefono: Teléfono de contacto
+        correo: Correo electrónico
+        comision_porcentaje: Porcentaje de comisión por ventas (0-100)
+        usuario: Usuario del sistema asociado (opcional)
+        activo: Si el vendedor está activo
+    """
     empresa = models.ForeignKey('empresas.Empresa', on_delete=models.PROTECT, related_name='vendedores', null=True, blank=True, db_index=True)
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     nombre = models.CharField(max_length=200)
@@ -42,25 +71,62 @@ class Vendedor(models.Model):
         indexes = [
             models.Index(fields=['empresa', 'activo']),
             models.Index(fields=['empresa', 'cedula']),
-            models.Index(fields=['-fecha_creacion']),
+            models.Index(fields=['empresa', '-fecha_creacion']),
+            models.Index(fields=['empresa', 'usuario']),
+        ]
+        permissions = [
+            ('gestionar_vendedor', 'Puede gestionar vendedores'),
         ]
 
     def clean(self):
-        """Validaciones a nivel de modelo"""
+        """
+        Validaciones a nivel de modelo.
+
+        Valida:
+        - Nombre no vacío
+        - Comisión entre 0 y 100
+        - Normalización de correo
+        - Usuario pertenece a la misma empresa
+        """
+        # Normalizar nombre
         if self.nombre:
             self.nombre = self.nombre.strip()
             if not self.nombre:
-                raise ValidationError({'nombre': 'El nombre no puede estar vacío.'})
-        
-        if self.comision_porcentaje < 0 or self.comision_porcentaje > 100:
-            raise ValidationError({'comision_porcentaje': 'La comisión debe estar entre 0 y 100.'})
-        
+                raise ValidationError({'nombre': ERROR_NOMBRE_VACIO})
+
+        # Validar rango de comisión
+        if self.comision_porcentaje < COMISION_MIN or self.comision_porcentaje > COMISION_MAX:
+            raise ValidationError({'comision_porcentaje': ERROR_COMISION_RANGO})
+
+        # Normalizar correo
         if self.correo:
             self.correo = self.correo.strip().lower()
-        
+
+        # Normalizar teléfono
+        if self.telefono:
+            self.telefono = self.telefono.strip()
+
         # Validar que usuario pertenezca a la misma empresa si ambos están asignados
         if self.usuario and self.empresa and hasattr(self.usuario, 'empresa') and self.usuario.empresa != self.empresa:
-            raise ValidationError({'usuario': 'El usuario debe pertenecer a la misma empresa del vendedor.'})
+            raise ValidationError({'usuario': ERROR_USUARIO_EMPRESA_DIFERENTE})
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda el vendedor con validaciones.
+
+        Ejecuta full_clean() antes de guardar para asegurar
+        que todas las validaciones del modelo se cumplan.
+        """
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = [
+            'nombre', 'cedula', 'comision_porcentaje',
+            'telefono', 'correo', 'usuario', 'empresa', 'activo'
+        ]
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.nombre} ({self.empresa.nombre if self.empresa else 'Sin empresa'})"

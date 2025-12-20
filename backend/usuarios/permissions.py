@@ -3,9 +3,14 @@ Permisos personalizados para el módulo de Usuarios
 
 Usa las clases base genéricas de core.permissions para
 eliminar código duplicado y mantener consistencia.
+
+Siguiendo la Guía Inicial:
+- Todos los permisos heredan de BaseEmpresaPermission
+- NO se crean permisos desde cero (DRY)
 """
 from rest_framework import permissions
 
+from core.permissions.base import BaseEmpresaPermission, BaseReadOnlyPermission
 from core.permissions.mixins import (
     AdminStaffMixin,
     EmpresaValidationMixin,
@@ -133,24 +138,90 @@ class IsOwnerOrReadOnly(OwnerValidationMixin, AdminStaffMixin, permissions.BaseP
         return self._is_owner(obj, request.user)
 
 
-class IsAdminOrSameEmpresa(EmpresaValidationMixin, AdminStaffMixin, permissions.BasePermission):
+class IsAdminOrSameEmpresa(BaseEmpresaPermission):
     """
     Permiso que permite a administradores todo, o a usuarios normales solo objetos de su empresa.
+
+    Hereda de BaseEmpresaPermission según la Guía Inicial.
+    No requiere permission_codename específico - solo valida empresa.
     """
 
+    def __init__(self):
+        super().__init__(
+            permission_codename=None,  # No requiere permiso específico
+            message='No tiene permiso para acceder a este recurso.'
+        )
+
     def has_permission(self, request, view):
-        # Administradores tienen acceso completo
-        if self._is_admin_or_staff(request.user):
-            return True
-        return request.user.is_authenticated
+        """Todos los autenticados tienen permiso a nivel de vista."""
+        if not request.user.is_authenticated:
+            return False
+        return True
 
     def has_object_permission(self, request, view, obj):
-        # Administradores tienen acceso completo
+        """
+        Verifica permiso a nivel de objeto.
+
+        - Superusuarios/staff tienen acceso completo
+        - Usuarios normales solo pueden acceder a objetos de su empresa
+        - Si el objeto es el mismo usuario, permitir acceso
+        """
+        if not request.user.is_authenticated:
+            return False
+
+        # Superusuarios y staff siempre tienen acceso
         if self._is_admin_or_staff(request.user):
             return True
 
-        # Verificar que el objeto pertenezca a la misma empresa del usuario
+        # Si el objeto es el mismo usuario, permitir acceso
+        if hasattr(obj, 'id') and obj.id == request.user.id:
+            return True
+
+        # Verificar que pertenezca a la misma empresa
         return self._belongs_to_same_empresa(obj, request.user)
+
+
+class CanChangeUser(BaseEmpresaPermission):
+    """
+    Permiso para modificar usuarios.
+
+    Hereda de BaseEmpresaPermission según la Guía Inicial.
+    Usado para acciones como activar, desactivar, asignar permisos/grupos.
+    """
+
+    def __init__(self):
+        super().__init__(
+            permission_codename='usuarios.change_user',
+            message='No tiene permiso para modificar usuarios.'
+        )
+
+
+class CanDeleteUser(BaseEmpresaPermission):
+    """
+    Permiso para eliminar usuarios.
+
+    Hereda de BaseEmpresaPermission según la Guía Inicial.
+    """
+
+    def __init__(self):
+        super().__init__(
+            permission_codename='usuarios.delete_user',
+            message='No tiene permiso para eliminar usuarios.'
+        )
+
+
+class CanAddUser(BaseEmpresaPermission):
+    """
+    Permiso para crear usuarios.
+
+    Hereda de BaseEmpresaPermission según la Guía Inicial.
+    """
+
+    def __init__(self):
+        super().__init__(
+            permission_codename='usuarios.add_user',
+            message='No tiene permiso para crear usuarios.'
+        )
 
 
 def require_permission(permission):

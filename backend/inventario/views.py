@@ -1,6 +1,19 @@
+"""
+Vistas para el módulo de Inventario.
+
+Implementa ViewSets con:
+- Logging para operaciones
+- Permisos personalizados
+- Paginación
+- Filtros avanzados
+- Optimización de queries
+"""
+import logging
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Sum, Q, F
 from django.utils import timezone
 from django.db import transaction
@@ -12,40 +25,79 @@ from .models import (
     ConteoFisico, DetalleConteoFisico
 )
 from .serializers import (
-    AlmacenSerializer, InventarioProductoSerializer, MovimientoInventarioSerializer,
-    ReservaStockSerializer, LoteSerializer, AlertaInventarioSerializer,
-    TransferenciaInventarioSerializer, DetalleTransferenciaSerializer,
-    AjusteInventarioSerializer, DetalleAjusteInventarioSerializer,
-    ConteoFisicoSerializer, DetalleConteoFisicoSerializer
+    AlmacenSerializer, AlmacenListSerializer,
+    InventarioProductoSerializer, InventarioProductoListSerializer,
+    MovimientoInventarioSerializer, MovimientoInventarioListSerializer,
+    ReservaStockSerializer, LoteSerializer, LoteListSerializer,
+    AlertaInventarioSerializer, AlertaInventarioListSerializer,
+    TransferenciaInventarioSerializer, TransferenciaInventarioListSerializer,
+    DetalleTransferenciaSerializer,
+    AjusteInventarioSerializer, AjusteInventarioListSerializer,
+    DetalleAjusteInventarioSerializer,
+    ConteoFisicoSerializer, ConteoFisicoListSerializer,
+    DetalleConteoFisicoSerializer
 )
 from .services import ServicioInventario, ServicioAlertasInventario
-from usuarios.permissions import ActionBasedPermission
-from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin, EmpresaFilterMixin, EmpresaAuditMixin
+from .permissions import (
+    CanGestionarAlmacen, CanGestionarInventario, CanGestionarMovimientos,
+    CanGestionarReservas, CanGestionarLotes, CanGestionarAlertas,
+    CanGestionarTransferencias, CanGestionarAjustes, CanAprobarAjustes,
+    CanGestionarConteos, CanVerKardex
+)
+from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
+from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PAGINACIÓN PERSONALIZADA
+# =============================================================================
+
+class InventarioPagination(PageNumberPagination):
+    """Paginación personalizada para el módulo de inventario."""
+    page_size = PAGE_SIZE_DEFAULT
+    page_size_query_param = 'page_size'
+    max_page_size = PAGE_SIZE_MAX
+
+
+# =============================================================================
+# VIEWSET DE ALMACENES
+# =============================================================================
 
 class AlmacenViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para gestión de almacenes."""
     queryset = Almacen.objects.all()
     serializer_class = AlmacenSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['activo', 'empresa']
     search_fields = ['nombre', 'direccion']
     ordering_fields = ['nombre', 'fecha_creacion']
     ordering = ['nombre']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), CanGestionarAlmacen()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return AlmacenListSerializer
+        return AlmacenSerializer
+
     def get_queryset(self):
-        """Filtrar almacenes según empresa del usuario"""
+        """Filtrar almacenes según empresa del usuario."""
         user = self.request.user
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related('empresa', 'usuario_creacion')
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             queryset = queryset.filter(empresa=user.empresa)
-        
-        activo = self.request.query_params.get('activo')
-        if activo is not None:
-            queryset = queryset.filter(activo=activo.lower() == 'true')
-        
         return queryset
-    
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear almacén"""
+        """Asignar empresa y usuarios al crear almacén."""
         user = self.request.user
         kwargs = {
             'usuario_creacion': user,
@@ -53,67 +105,95 @@ class AlmacenViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, vi
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Almacén creado: {instance.nombre} (id={instance.id}, empresa_id={instance.empresa_id}, usuario={user.id})")
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Almacén actualizado: {instance.nombre} (id={instance.id}, usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar almacén."""
+        logger.warning(f"Almacén eliminado: {instance.nombre} (id={instance.id}, usuario={self.request.user.id})")
+        super().perform_destroy(instance)
+
+
+# =============================================================================
+# VIEWSET DE INVENTARIO DE PRODUCTOS
+# =============================================================================
 
 class InventarioProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
-    # InventarioProducto generalmente no se crea directamente via API, sino por movimientos
+    """ViewSet para inventario de productos."""
     queryset = InventarioProducto.objects.all()
     serializer_class = InventarioProductoSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['almacen', 'producto', 'empresa']
     search_fields = ['producto__nombre', 'producto__codigo_sku']
     ordering_fields = ['producto__nombre', 'cantidad_disponible', 'fecha_creacion']
     ordering = ['producto__nombre']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), CanGestionarInventario()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return InventarioProductoListSerializer
+        return InventarioProductoSerializer
+
     def get_queryset(self):
-        """Filtrar inventarios según empresa del usuario"""
-        queryset = super().get_queryset()
-        almacen = self.request.query_params.get('almacen')
-        if almacen:
-            queryset = queryset.filter(almacen_id=almacen)
-        
-        producto = self.request.query_params.get('producto')
-        if producto:
-            queryset = queryset.filter(producto_id=producto)
-        
+        """Filtrar inventarios según empresa del usuario."""
+        queryset = super().get_queryset().select_related('producto', 'almacen', 'empresa')
+
         bajo_minimo = self.request.query_params.get('bajo_minimo')
         if bajo_minimo == 'true':
             queryset = queryset.filter(cantidad_disponible__lte=F('stock_minimo'))
-        
+
         return queryset
 
+
+# =============================================================================
+# VIEWSET DE MOVIMIENTOS DE INVENTARIO
+# =============================================================================
+
 class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para movimientos de inventario."""
     queryset = MovimientoInventario.objects.all()
     serializer_class = MovimientoInventarioSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['producto', 'almacen', 'tipo_movimiento', 'empresa']
     search_fields = ['producto__nombre', 'producto__codigo_sku', 'referencia']
     ordering_fields = ['fecha', 'tipo_movimiento']
     ordering = ['-fecha']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action == 'kardex':
+            return [permissions.IsAuthenticated(), CanVerKardex()]
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), CanGestionarMovimientos()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return MovimientoInventarioListSerializer
+        return MovimientoInventarioSerializer
+
     def get_queryset(self):
-        """Filtrar movimientos según empresa del usuario"""
-        queryset = super().get_queryset()
-        producto = self.request.query_params.get('producto')
-        if producto:
-            queryset = queryset.filter(producto_id=producto)
-        
-        almacen = self.request.query_params.get('almacen')
-        if almacen:
-            queryset = queryset.filter(almacen_id=almacen)
-        
-        tipo_movimiento = self.request.query_params.get('tipo_movimiento')
-        if tipo_movimiento:
-            queryset = queryset.filter(tipo_movimiento=tipo_movimiento)
-        
-        return queryset
-    
+        """Filtrar movimientos según empresa del usuario."""
+        return super().get_queryset().select_related(
+            'producto', 'almacen', 'usuario', 'lote', 'empresa'
+        )
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear movimiento"""
+        """Asignar empresa y usuarios al crear movimiento."""
         user = self.request.user
         kwargs = {
             'usuario': user,
@@ -122,14 +202,18 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(
+            f"Movimiento creado: {instance.tipo_movimiento} de {instance.cantidad} unidades "
+            f"(producto={instance.producto_id}, almacen={instance.almacen_id}, usuario={user.id})"
+        )
+
     @action(detail=False, methods=['get'], url_path='kardex')
     def kardex(self, request):
         """
         Endpoint de Kardex según especificaciones.
         Devuelve el historial de movimientos por producto y almacén, con saldo acumulado.
-        
+
         Parámetros de consulta:
         - producto_id: ID del producto (requerido)
         - almacen_id: ID del almacén (requerido)
@@ -140,13 +224,15 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
         almacen_id = request.query_params.get('almacen_id')
         fecha_desde = request.query_params.get('fecha_desde')
         fecha_hasta = request.query_params.get('fecha_hasta')
-        
+
         if not producto_id or not almacen_id:
             return Response(
                 {'error': 'Los parámetros producto_id y almacen_id son requeridos'},
                 status=400
             )
-        
+
+        logger.info(f"Kardex consultado: producto={producto_id}, almacen={almacen_id}, usuario={request.user.id}")
+
         # Filtrar movimientos por empresa también
         user = request.user
         queryset = MovimientoInventario.objects.filter(
@@ -156,15 +242,14 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             queryset = queryset.filter(empresa=user.empresa)
         queryset = queryset.select_related('producto', 'almacen', 'usuario', 'lote').order_by('fecha')
-        
+
         # Filtros opcionales de fecha
         if fecha_desde:
             queryset = queryset.filter(fecha__gte=fecha_desde)
         if fecha_hasta:
             queryset = queryset.filter(fecha__lte=fecha_hasta)
-        
+
         # Calcular saldo inicial
-        # Si hay fecha_desde, calcular saldo hasta esa fecha
         if fecha_desde:
             movimientos_anteriores = MovimientoInventario.objects.filter(
                 producto_id=producto_id,
@@ -173,34 +258,30 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
             )
             if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
                 movimientos_anteriores = movimientos_anteriores.filter(empresa=user.empresa)
-            
-            # Calcular saldo inicial sumando entradas y restando salidas
+
             entradas = movimientos_anteriores.filter(
                 tipo_movimiento__in=[
                     'ENTRADA_COMPRA', 'ENTRADA_AJUSTE', 'TRANSFERENCIA_ENTRADA',
                     'DEVOLUCION_CLIENTE'
                 ]
             ).aggregate(total=Sum('cantidad'))['total'] or 0
-            
+
             salidas = movimientos_anteriores.filter(
                 tipo_movimiento__in=[
                     'SALIDA_VENTA', 'SALIDA_AJUSTE', 'TRANSFERENCIA_SALIDA',
                     'DEVOLUCION_PROVEEDOR'
                 ]
             ).aggregate(total=Sum('cantidad'))['total'] or 0
-            
+
             saldo_inicial = entradas - salidas
         else:
-            # Si no hay fecha_desde, el saldo inicial es 0 (asumiendo que empezó desde cero)
-            # O podríamos usar el inventario actual menos los movimientos del período
             saldo_inicial = 0
-        
+
         saldo_acumulado = saldo_inicial
-        
+
         # Construir respuesta con saldo acumulado
         movimientos = []
         for movimiento in queryset:
-            # Calcular saldo acumulado
             if movimiento.tipo_movimiento in [
                 'ENTRADA_COMPRA', 'ENTRADA_AJUSTE', 'TRANSFERENCIA_ENTRADA',
                 'DEVOLUCION_CLIENTE'
@@ -211,7 +292,7 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
                 'DEVOLUCION_PROVEEDOR'
             ]:
                 saldo_acumulado -= movimiento.cantidad
-            
+
             movimientos.append({
                 'id': movimiento.id,
                 'fecha': movimiento.fecha,
@@ -237,11 +318,10 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
                     'nombre': movimiento.almacen.nombre,
                 },
             })
-        
-        # Información del producto y almacén
+
         producto = queryset.first().producto if queryset.exists() else None
         almacen = queryset.first().almacen if queryset.exists() else None
-        
+
         return Response({
             'producto': {
                 'id': producto.id if producto else producto_id,
@@ -261,26 +341,35 @@ class MovimientoInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempot
         })
 
 
-# ========== VIEWSETS DE RESERVAS ==========
+# =============================================================================
+# VIEWSET DE RESERVAS
+# =============================================================================
 
 class ReservaStockViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para reservas de stock."""
     queryset = ReservaStock.objects.all()
     serializer_class = ReservaStockSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'empresa']
     search_fields = ['referencia', 'inventario__producto__nombre']
     ordering_fields = ['fecha_reserva', 'estado']
-    
+    ordering = ['-fecha_reserva']
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'confirmar', 'cancelar']:
+            return [permissions.IsAuthenticated(), CanGestionarReservas()]
+        return [permissions.IsAuthenticated()]
+
     def get_queryset(self):
-        """Filtrar reservas según empresa del usuario"""
-        queryset = super().get_queryset()
-        estado = self.request.query_params.get('estado')
-        if estado:
-            queryset = queryset.filter(estado=estado)
-        return queryset
-    
+        """Filtrar reservas según empresa del usuario."""
+        return super().get_queryset().select_related(
+            'inventario__producto', 'inventario__almacen', 'usuario', 'empresa'
+        )
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear reserva"""
+        """Asignar empresa y usuarios al crear reserva."""
         user = self.request.user
         kwargs = {
             'usuario': user,
@@ -289,68 +378,75 @@ class ReservaStockViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Reserva creada: {instance.cantidad_reservada} unidades (id={instance.id}, usuario={user.id})")
+
     @action(detail=True, methods=['post'])
     def confirmar(self, request, pk=None):
-        """Confirma una reserva de stock"""
+        """Confirma una reserva de stock."""
         reserva = self.get_object()
         try:
             ServicioInventario.confirmar_reserva(reserva)
+            logger.info(f"Reserva confirmada: id={reserva.id}, usuario={request.user.id}")
             serializer = self.get_serializer(reserva)
             return Response(serializer.data)
         except Exception as e:
+            logger.error(f"Error confirmando reserva {reserva.id}: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     @action(detail=True, methods=['post'])
     def cancelar(self, request, pk=None):
-        """Cancela una reserva de stock"""
+        """Cancela una reserva de stock."""
         reserva = self.get_object()
         try:
             ServicioInventario.cancelar_reserva(reserva)
+            logger.info(f"Reserva cancelada: id={reserva.id}, usuario={request.user.id}")
             serializer = self.get_serializer(reserva)
             return Response(serializer.data)
         except Exception as e:
+            logger.error(f"Error cancelando reserva {reserva.id}: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ========== VIEWSETS DE LOTES ==========
+# =============================================================================
+# VIEWSET DE LOTES
+# =============================================================================
 
-class LoteViewSet(IdempotencyMixin, viewsets.ModelViewSet):
+class LoteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para lotes de productos."""
     queryset = Lote.objects.all()
     serializer_class = LoteSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'producto', 'almacen', 'empresa']
     search_fields = ['codigo_lote', 'numero_lote', 'producto__nombre', 'producto__codigo_sku']
     ordering_fields = ['fecha_ingreso', 'fecha_vencimiento', 'estado']
-    
+    ordering = ['-fecha_ingreso']
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), CanGestionarLotes()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return LoteListSerializer
+        return LoteSerializer
+
     def get_queryset(self):
-        """Filtrar lotes según empresa del usuario"""
-        user = self.request.user
-        queryset = super().get_queryset()
-        if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
-            queryset = queryset.filter(empresa=user.empresa)
-        
-        estado = self.request.query_params.get('estado')
-        if estado:
-            queryset = queryset.filter(estado=estado)
-        
+        """Filtrar lotes según empresa del usuario."""
+        queryset = super().get_queryset().select_related('producto', 'almacen', 'empresa', 'proveedor')
+
         vencidos = self.request.query_params.get('vencidos')
         if vencidos == 'true':
             queryset = queryset.filter(fecha_vencimiento__lt=timezone.now().date())
-        
-        producto = self.request.query_params.get('producto')
-        if producto:
-            queryset = queryset.filter(producto_id=producto)
-        
-        almacen = self.request.query_params.get('almacen')
-        if almacen:
-            queryset = queryset.filter(almacen_id=almacen)
-        
+
         return queryset
-    
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear lote"""
+        """Asignar empresa y usuarios al crear lote."""
         user = self.request.user
         kwargs = {
             'usuario_creacion': user,
@@ -358,49 +454,57 @@ class LoteViewSet(IdempotencyMixin, viewsets.ModelViewSet):
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Lote creado: {instance.codigo_lote} (id={instance.id}, producto={instance.producto_id}, usuario={user.id})")
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Lote actualizado: {instance.codigo_lote} (id={instance.id}, usuario={self.request.user.id})")
 
 
-# ========== VIEWSETS DE ALERTAS ==========
+# =============================================================================
+# VIEWSET DE ALERTAS
+# =============================================================================
 
 class AlertaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para alertas de inventario."""
     queryset = AlertaInventario.objects.all()
     serializer_class = AlertaInventarioSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['tipo', 'prioridad', 'resuelta', 'empresa']
     search_fields = ['mensaje', 'inventario__producto__nombre', 'lote__codigo_lote']
     ordering_fields = ['fecha_alerta', 'prioridad', 'tipo']
     ordering = ['-fecha_alerta']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'resolver', 'generar_alertas']:
+            return [permissions.IsAuthenticated(), CanGestionarAlertas()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return AlertaInventarioListSerializer
+        return AlertaInventarioSerializer
+
     def get_queryset(self):
-        """Filtrar alertas según empresa del usuario"""
-        user = self.request.user
-        queryset = super().get_queryset()
-        if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
-            queryset = queryset.filter(empresa=user.empresa)
-        
+        """Filtrar alertas según empresa del usuario."""
+        queryset = super().get_queryset().select_related(
+            'inventario__producto', 'inventario__almacen', 'lote__producto', 'empresa'
+        )
+
         # Filtrar solo alertas no resueltas por defecto
         resueltas = self.request.query_params.get('resueltas')
         if resueltas != 'true':
             queryset = queryset.filter(resuelta=False)
-        
-        # Filtros adicionales
-        tipo = self.request.query_params.get('tipo')
-        if tipo:
-            queryset = queryset.filter(tipo=tipo)
-        
-        prioridad = self.request.query_params.get('prioridad')
-        if prioridad:
-            queryset = queryset.filter(prioridad=prioridad)
-        
+
         return queryset
-    
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear alerta"""
+        """Asignar empresa y usuarios al crear alerta."""
         user = self.request.user
         kwargs = {
             'usuario_creacion': user,
@@ -408,76 +512,87 @@ class AlertaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Alerta creada: {instance.tipo} - {instance.prioridad} (id={instance.id}, usuario={user.id})")
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
-    
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Alerta actualizada: id={instance.id}, usuario={self.request.user.id}")
+
     @action(detail=True, methods=['post'])
     def resolver(self, request, pk=None):
-        """Marca una alerta como resuelta"""
+        """Marca una alerta como resuelta."""
         alerta = self.get_object()
         alerta.resuelta = True
         alerta.usuario_resolucion = request.user
         alerta.fecha_resuelta = timezone.now()
         alerta.save()
+        logger.info(f"Alerta resuelta: id={alerta.id}, usuario={request.user.id}")
         serializer = self.get_serializer(alerta)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['post'])
     def generar_alertas(self, request):
-        """Genera todas las alertas de inventario"""
+        """Genera todas las alertas de inventario."""
         try:
             resultado = ServicioAlertasInventario.generar_todas_las_alertas()
+            logger.info(f"Alertas generadas: {resultado['total']} (usuario={request.user.id})")
             return Response({
                 'mensaje': 'Alertas generadas exitosamente',
                 'resultado': resultado
             })
         except Exception as e:
+            logger.error(f"Error generando alertas: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ========== VIEWSETS DE TRANSFERENCIAS ==========
+# =============================================================================
+# VIEWSETS DE TRANSFERENCIAS
+# =============================================================================
 
 class DetalleTransferenciaViewSet(viewsets.ModelViewSet):
+    """ViewSet para detalles de transferencias."""
     queryset = DetalleTransferencia.objects.all()
     serializer_class = DetalleTransferenciaSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
+    pagination_class = InventarioPagination
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        return [permissions.IsAuthenticated(), CanGestionarTransferencias()]
 
 
 class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para transferencias de inventario."""
     queryset = TransferenciaInventario.objects.all()
     serializer_class = TransferenciaInventarioSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'almacen_origen', 'almacen_destino', 'empresa']
     search_fields = ['numero_transferencia', 'almacen_origen__nombre', 'almacen_destino__nombre']
     ordering_fields = ['fecha_solicitud', 'estado']
     ordering = ['-fecha_solicitud']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'enviar', 'recibir']:
+            return [permissions.IsAuthenticated(), CanGestionarTransferencias()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return TransferenciaInventarioListSerializer
+        return TransferenciaInventarioSerializer
+
     def get_queryset(self):
-        """Filtrar transferencias según empresa del usuario"""
-        user = self.request.user
-        queryset = super().get_queryset()
-        if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
-            queryset = queryset.filter(empresa=user.empresa)
-        
-        estado = self.request.query_params.get('estado')
-        if estado:
-            queryset = queryset.filter(estado=estado)
-        
-        almacen_origen = self.request.query_params.get('almacen_origen')
-        if almacen_origen:
-            queryset = queryset.filter(almacen_origen_id=almacen_origen)
-        
-        almacen_destino = self.request.query_params.get('almacen_destino')
-        if almacen_destino:
-            queryset = queryset.filter(almacen_destino_id=almacen_destino)
-        
-        return queryset
-    
+        """Filtrar transferencias según empresa del usuario."""
+        return super().get_queryset().select_related(
+            'almacen_origen', 'almacen_destino', 'usuario_solicitante', 'usuario_receptor', 'empresa'
+        ).prefetch_related('detalles__producto')
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear transferencia"""
+        """Asignar empresa y usuarios al crear transferencia."""
         user = self.request.user
         kwargs = {
             'usuario_solicitante': user,
@@ -486,26 +601,31 @@ class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(
+            f"Transferencia creada: {instance.numero_transferencia} "
+            f"({instance.almacen_origen} -> {instance.almacen_destino}, usuario={user.id})"
+        )
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
-    
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Transferencia actualizada: {instance.numero_transferencia} (usuario={self.request.user.id})")
+
     @action(detail=True, methods=['post'])
     def enviar(self, request, pk=None):
-        """Marca la transferencia como enviada"""
+        """Marca la transferencia como enviada."""
         transferencia = self.get_object()
         if transferencia.estado != 'PENDIENTE':
             return Response(
                 {'error': 'Solo se pueden enviar transferencias pendientes'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         transferencia.estado = 'EN_TRANSITO'
         transferencia.fecha_envio = timezone.now()
         transferencia.save()
-        
+
         # Registrar movimientos de salida para cada detalle
         detalles = transferencia.detalles.all()
         for detalle in detalles:
@@ -521,25 +641,26 @@ class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
                     referencia=f"TRF-{transferencia.numero_transferencia}",
                     lote=detalle.lote
                 )
-        
+
+        logger.info(f"Transferencia enviada: {transferencia.numero_transferencia} (usuario={request.user.id})")
         serializer = self.get_serializer(transferencia)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     def recibir(self, request, pk=None):
-        """Marca la transferencia como recibida"""
+        """Marca la transferencia como recibida."""
         transferencia = self.get_object()
         if transferencia.estado not in ['EN_TRANSITO', 'RECIBIDA_PARCIAL']:
             return Response(
                 {'error': 'Solo se pueden recibir transferencias en tránsito'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         transferencia.estado = 'RECIBIDA'
         transferencia.fecha_recepcion = timezone.now()
         transferencia.usuario_receptor = request.user
         transferencia.save()
-        
+
         # Registrar movimientos de entrada para cada detalle recibido
         detalles = transferencia.detalles.all()
         for detalle in detalles:
@@ -555,51 +676,60 @@ class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
                     referencia=f"TRF-{transferencia.numero_transferencia}",
                     lote=detalle.lote
                 )
-        
+
+        logger.info(f"Transferencia recibida: {transferencia.numero_transferencia} (usuario={request.user.id})")
         serializer = self.get_serializer(transferencia)
         return Response(serializer.data)
 
 
-# ========== VIEWSETS DE AJUSTES ==========
+# =============================================================================
+# VIEWSETS DE AJUSTES
+# =============================================================================
 
 class DetalleAjusteInventarioViewSet(viewsets.ModelViewSet):
+    """ViewSet para detalles de ajustes."""
     queryset = DetalleAjusteInventario.objects.all()
     serializer_class = DetalleAjusteInventarioSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
+    pagination_class = InventarioPagination
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        return [permissions.IsAuthenticated(), CanGestionarAjustes()]
 
 
 class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para ajustes de inventario."""
     queryset = AjusteInventario.objects.all()
     serializer_class = AjusteInventarioSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'tipo_ajuste', 'almacen', 'empresa']
     search_fields = ['motivo', 'almacen__nombre']
     ordering_fields = ['fecha_ajuste', 'estado']
     ordering = ['-fecha_ajuste']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['aprobar', 'rechazar']:
+            return [permissions.IsAuthenticated(), CanAprobarAjustes()]
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'procesar']:
+            return [permissions.IsAuthenticated(), CanGestionarAjustes()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return AjusteInventarioListSerializer
+        return AjusteInventarioSerializer
+
     def get_queryset(self):
-        """Filtrar ajustes según empresa del usuario"""
-        user = self.request.user
-        queryset = super().get_queryset()
-        if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
-            queryset = queryset.filter(empresa=user.empresa)
-        
-        estado = self.request.query_params.get('estado')
-        if estado:
-            queryset = queryset.filter(estado=estado)
-        
-        tipo_ajuste = self.request.query_params.get('tipo_ajuste')
-        if tipo_ajuste:
-            queryset = queryset.filter(tipo_ajuste=tipo_ajuste)
-        
-        almacen = self.request.query_params.get('almacen')
-        if almacen:
-            queryset = queryset.filter(almacen_id=almacen)
-        
-        return queryset
-    
+        """Filtrar ajustes según empresa del usuario."""
+        return super().get_queryset().select_related(
+            'almacen', 'usuario_solicitante', 'usuario_aprobador', 'empresa'
+        ).prefetch_related('detalles__producto')
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear ajuste"""
+        """Asignar empresa y usuarios al crear ajuste."""
         user = self.request.user
         kwargs = {
             'usuario_solicitante': user,
@@ -608,66 +738,70 @@ class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Ajuste creado: {instance.tipo_ajuste} (id={instance.id}, almacen={instance.almacen_id}, usuario={user.id})")
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
-    
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Ajuste actualizado: id={instance.id}, usuario={self.request.user.id}")
+
     @action(detail=True, methods=['post'])
     def aprobar(self, request, pk=None):
-        """Aprueba un ajuste de inventario"""
+        """Aprueba un ajuste de inventario."""
         ajuste = self.get_object()
         if ajuste.estado != 'PENDIENTE':
             return Response(
                 {'error': 'Solo se pueden aprobar ajustes pendientes'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         ajuste.estado = 'APROBADO'
         ajuste.usuario_aprobador = request.user
         ajuste.fecha_aprobacion = timezone.now()
         ajuste.observaciones_aprobacion = request.data.get('observaciones', '')
         ajuste.save()
-        
+
+        logger.info(f"Ajuste aprobado: id={ajuste.id}, usuario={request.user.id}")
         serializer = self.get_serializer(ajuste)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     def rechazar(self, request, pk=None):
-        """Rechaza un ajuste de inventario"""
+        """Rechaza un ajuste de inventario."""
         ajuste = self.get_object()
         if ajuste.estado != 'PENDIENTE':
             return Response(
                 {'error': 'Solo se pueden rechazar ajustes pendientes'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         ajuste.estado = 'RECHAZADO'
         ajuste.usuario_aprobador = request.user
         ajuste.fecha_aprobacion = timezone.now()
         ajuste.observaciones_aprobacion = request.data.get('observaciones', '')
         ajuste.save()
-        
+
+        logger.info(f"Ajuste rechazado: id={ajuste.id}, usuario={request.user.id}")
         serializer = self.get_serializer(ajuste)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def procesar(self, request, pk=None):
-        """Procesa un ajuste aprobado (aplica los cambios al inventario)"""
+        """Procesa un ajuste aprobado (aplica los cambios al inventario)."""
         ajuste = self.get_object()
         if ajuste.estado != 'APROBADO':
             return Response(
                 {'error': 'Solo se pueden procesar ajustes aprobados'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Aplicar cada detalle del ajuste
         for detalle in ajuste.detalles.all():
             if detalle.diferencia != 0:
                 tipo_movimiento = 'ENTRADA_AJUSTE' if detalle.diferencia > 0 else 'SALIDA_AJUSTE'
-                
+
                 ServicioInventario.registrar_movimiento(
                     producto=detalle.producto,
                     almacen=ajuste.almacen,
@@ -680,54 +814,61 @@ class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
                     lote=detalle.lote,
                     notas=f"Ajuste: {ajuste.motivo}"
                 )
-        
+
         ajuste.estado = 'PROCESADO'
         ajuste.save()
-        
+
+        logger.info(f"Ajuste procesado: id={ajuste.id}, usuario={request.user.id}")
         serializer = self.get_serializer(ajuste)
         return Response(serializer.data)
 
 
-# ========== VIEWSETS DE CONTEO FÍSICO ==========
+# =============================================================================
+# VIEWSETS DE CONTEO FÍSICO
+# =============================================================================
 
 class DetalleConteoFisicoViewSet(viewsets.ModelViewSet):
+    """ViewSet para detalles de conteos físicos."""
     queryset = DetalleConteoFisico.objects.all()
     serializer_class = DetalleConteoFisicoSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
+    pagination_class = InventarioPagination
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        return [permissions.IsAuthenticated(), CanGestionarConteos()]
 
 
 class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """ViewSet para conteos físicos."""
     queryset = ConteoFisico.objects.all()
     serializer_class = ConteoFisicoSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['estado', 'tipo_conteo', 'almacen', 'empresa']
     search_fields = ['numero_conteo', 'almacen__nombre']
     ordering_fields = ['fecha_conteo', 'estado']
     ordering = ['-fecha_conteo']
-    
+
+    def get_permissions(self):
+        """Aplica permisos según la acción."""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'iniciar', 'finalizar', 'ajustar']:
+            return [permissions.IsAuthenticated(), CanGestionarConteos()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Retorna serializer optimizado para listado."""
+        if self.action == 'list':
+            return ConteoFisicoListSerializer
+        return ConteoFisicoSerializer
+
     def get_queryset(self):
-        """Filtrar conteos según empresa del usuario"""
-        user = self.request.user
-        queryset = super().get_queryset()
-        if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
-            queryset = queryset.filter(empresa=user.empresa)
-        
-        estado = self.request.query_params.get('estado')
-        if estado:
-            queryset = queryset.filter(estado=estado)
-        
-        tipo_conteo = self.request.query_params.get('tipo_conteo')
-        if tipo_conteo:
-            queryset = queryset.filter(tipo_conteo=tipo_conteo)
-        
-        almacen = self.request.query_params.get('almacen')
-        if almacen:
-            queryset = queryset.filter(almacen_id=almacen)
-        
-        return queryset
-    
+        """Filtrar conteos según empresa del usuario."""
+        return super().get_queryset().select_related(
+            'almacen', 'usuario_responsable', 'empresa'
+        ).prefetch_related('detalles__producto')
+
     def perform_create(self, serializer):
-        """Asignar empresa y usuarios al crear conteo"""
+        """Asignar empresa y usuarios al crear conteo."""
         user = self.request.user
         kwargs = {
             'usuario_responsable': user,
@@ -736,57 +877,61 @@ class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
         }
         if user.is_authenticated and hasattr(user, 'empresa') and user.empresa:
             kwargs['empresa'] = user.empresa
-        serializer.save(**kwargs)
-    
+        instance = serializer.save(**kwargs)
+        logger.info(f"Conteo creado: {instance.numero_conteo} (id={instance.id}, almacen={instance.almacen_id}, usuario={user.id})")
+
     def perform_update(self, serializer):
-        """Actualizar usuario de modificación"""
-        serializer.save(usuario_modificacion=self.request.user)
-    
+        """Actualizar usuario de modificación."""
+        instance = serializer.save(usuario_modificacion=self.request.user)
+        logger.info(f"Conteo actualizado: {instance.numero_conteo} (usuario={self.request.user.id})")
+
     @action(detail=True, methods=['post'])
     def iniciar(self, request, pk=None):
-        """Inicia un conteo físico"""
+        """Inicia un conteo físico."""
         conteo = self.get_object()
         if conteo.estado != 'PLANIFICADO':
             return Response(
                 {'error': 'Solo se pueden iniciar conteos planificados'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         conteo.estado = 'EN_PROCESO'
         conteo.fecha_inicio = timezone.now()
         conteo.save()
-        
+
+        logger.info(f"Conteo iniciado: {conteo.numero_conteo} (usuario={request.user.id})")
         serializer = self.get_serializer(conteo)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     def finalizar(self, request, pk=None):
-        """Finaliza un conteo físico"""
+        """Finaliza un conteo físico."""
         conteo = self.get_object()
         if conteo.estado != 'EN_PROCESO':
             return Response(
                 {'error': 'Solo se pueden finalizar conteos en proceso'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         conteo.estado = 'FINALIZADO'
         conteo.fecha_fin = timezone.now()
         conteo.save()
-        
+
+        logger.info(f"Conteo finalizado: {conteo.numero_conteo} (usuario={request.user.id})")
         serializer = self.get_serializer(conteo)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def ajustar(self, request, pk=None):
-        """Ajusta el inventario basado en las diferencias del conteo"""
+        """Ajusta el inventario basado en las diferencias del conteo."""
         conteo = self.get_object()
         if conteo.estado != 'FINALIZADO':
             return Response(
                 {'error': 'Solo se pueden ajustar conteos finalizados'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Crear ajuste automático basado en las diferencias
         ajuste = AjusteInventario.objects.create(
             empresa=conteo.empresa,
@@ -794,12 +939,12 @@ class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
             tipo_ajuste='AJUSTE_DIFERENCIA',
             motivo=f'Ajuste por conteo físico {conteo.numero_conteo}',
             fecha_ajuste=conteo.fecha_conteo,
-            estado='APROBADO',  # Auto-aprobado porque viene de conteo
+            estado='APROBADO',
             usuario_solicitante=conteo.usuario_responsable,
             usuario_aprobador=conteo.usuario_responsable,
             fecha_aprobacion=timezone.now()
         )
-        
+
         # Crear detalles del ajuste
         for detalle_conteo in conteo.detalles.all():
             if detalle_conteo.diferencia != 0:
@@ -809,14 +954,14 @@ class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
                     lote=detalle_conteo.lote,
                     cantidad_anterior=detalle_conteo.cantidad_sistema,
                     cantidad_nueva=detalle_conteo.cantidad_fisica,
-                    costo_unitario=detalle_conteo.producto.precio_venta_base  # Usar precio base como referencia
+                    costo_unitario=detalle_conteo.producto.precio_venta_base
                 )
-        
+
         # Procesar el ajuste automáticamente
         for detalle_conteo in conteo.detalles.all():
             if detalle_conteo.diferencia != 0:
                 tipo_movimiento = 'ENTRADA_AJUSTE' if detalle_conteo.diferencia > 0 else 'SALIDA_AJUSTE'
-                
+
                 ServicioInventario.registrar_movimiento(
                     producto=detalle_conteo.producto,
                     almacen=conteo.almacen,
@@ -829,9 +974,10 @@ class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
                     lote=detalle_conteo.lote,
                     notas=f"Ajuste por conteo físico {conteo.numero_conteo}"
                 )
-        
+
         conteo.estado = 'AJUSTADO'
         conteo.save()
-        
+
+        logger.info(f"Conteo ajustado: {conteo.numero_conteo} (ajuste_id={ajuste.id}, usuario={request.user.id})")
         serializer = self.get_serializer(conteo)
         return Response(serializer.data)

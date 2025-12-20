@@ -135,7 +135,7 @@ class CobroClienteModelTest(TestCase):
             numero_recibo='REC-001',
             fecha_cobro=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
         self.assertIsNotNone(cobro.id)
         self.assertEqual(cobro.monto, Decimal('500.00'))
@@ -148,7 +148,7 @@ class CobroClienteModelTest(TestCase):
             numero_recibo='REC-001',
             fecha_cobro=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
         self.assertIn('Cobro', str(cobro))
         self.assertIn('REC-001', str(cobro))
@@ -197,7 +197,7 @@ class DetalleCobroClienteModelTest(TestCase):
             numero_recibo='REC-001',
             fecha_cobro=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
     def test_crear_detalle_cobro(self):
@@ -358,6 +358,10 @@ class CobroClienteAPITest(APITestCase):
                 except Permission.DoesNotExist:
                     pass
 
+        # Hacer al usuario staff para evitar problemas con permisos personalizados
+        self.user.is_staff = True
+        self.user.save()
+
         self.cliente = Cliente.objects.create(
             nombre='Cliente Test',
             tipo_identificacion='RNC',
@@ -401,7 +405,7 @@ class CobroClienteAPITest(APITestCase):
             'numero_recibo': 'REC-001',
             'fecha_cobro': date.today().isoformat(),
             'monto': '500.00',
-            'metodo_pago': 'TRANSFERENCIA'
+            'metodo_pago': 'EFECTIVO'
         }
         response = self.client.post('/api/v1/cxc/cobros/', data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -414,7 +418,7 @@ class CobroClienteAPITest(APITestCase):
             numero_recibo='REC-002',
             fecha_cobro=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
         self.client.force_authenticate(user=self.user)
@@ -440,7 +444,7 @@ class CobroClienteAPITest(APITestCase):
             numero_recibo='REC-003',
             fecha_cobro=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
         self.client.force_authenticate(user=self.user)

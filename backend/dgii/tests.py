@@ -313,12 +313,17 @@ class SecuenciaNCFAPITest(APITestCase):
 
     def test_generar_ncf_secuencia_vencida(self):
         """Test: Error al generar NCF de secuencia vencida"""
+        # Crear con fecha válida primero
         secuencia = SecuenciaNCF.objects.create(
             empresa=self.empresa,
             tipo_comprobante=self.tipo,
             descripcion='Talonario Vencido',
             secuencia_inicial=1,
             secuencia_final=100,
+            fecha_vencimiento=date.today() + timedelta(days=30)
+        )
+        # Actualizar fecha a pasada usando update() para bypass de validación
+        SecuenciaNCF.objects.filter(pk=secuencia.pk).update(
             fecha_vencimiento=date.today() - timedelta(days=1)
         )
         self.client.force_authenticate(user=self.user)

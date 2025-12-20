@@ -70,6 +70,21 @@ class SolicitudCotizacionProveedor(models.Model):
             if not self.detalles:
                 raise ValidationError({'detalles': 'Los detalles no pueden estar vacíos.'})
 
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'proveedor', 'estado']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+        super().save(*args, **kwargs)
+
     @property
     def estado_display(self):
         return self.get_estado_display()

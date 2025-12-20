@@ -277,7 +277,21 @@ class DespachoAPITest(APITestCase):
         self.assertEqual(response.data['estado'], 'EN_PREPARACION')
 
     def test_preparar_despacho_no_pendiente(self):
-        """Test: No se puede preparar despacho que no está pendiente"""
+        """Test: No se puede preparar despacho completado (estado terminal)"""
+        despacho = Despacho.objects.create(
+            factura=self.factura,
+            cliente=self.cliente,
+            almacen=self.almacen,
+            empresa=self.empresa,
+            estado='COMPLETADO'
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/v1/despachos/{despacho.id}/preparar/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_preparar_despacho_idempotente(self):
+        """Test: Preparar despacho ya en preparación es idempotente"""
         despacho = Despacho.objects.create(
             factura=self.factura,
             cliente=self.cliente,
@@ -288,7 +302,9 @@ class DespachoAPITest(APITestCase):
 
         self.client.force_authenticate(user=self.user)
         response = self.client.post(f'/api/v1/despachos/{despacho.id}/preparar/')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # Idempotente: ya está en preparación, retorna éxito
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['estado'], 'EN_PREPARACION')
 
     def test_completar_despacho(self):
         """Test: Completar despacho"""

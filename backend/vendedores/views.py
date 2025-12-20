@@ -1,128 +1,201 @@
+"""
+ViewSets para el módulo Vendedores
+
+Este módulo contiene los ViewSets para gestión de vendedores.
+Incluye soporte para multi-tenancy con filtrado y asignación automática de empresa.
+"""
+import logging
+from datetime import datetime
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db.models import Sum, Count, Q
-from datetime import datetime, timedelta
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
+
 from .models import Vendedor
-from .serializers import VendedorSerializer
-from usuarios.permissions import ActionBasedPermission
+from .serializers import VendedorSerializer, VendedorListSerializer
+from .permissions import CanGestionarVendedor
+from .services import ServicioVendedor
+from .constants import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX
 from core.mixins import IdempotencyMixin, EmpresaFilterMixin, EmpresaAuditMixin
 
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PAGINACIÓN
+# =============================================================================
+
+class VendedoresPagination(PageNumberPagination):
+    """Paginación personalizada para el módulo Vendedores"""
+    page_size = PAGE_SIZE_DEFAULT
+    page_size_query_param = 'page_size'
+    max_page_size = PAGE_SIZE_MAX
+
+
+# =============================================================================
+# VIEWSETS
+# =============================================================================
+
 class VendedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar vendedores.
+
+    Endpoints:
+    - GET /vendedores/ - Lista todos los vendedores (filtrado por empresa)
+    - POST /vendedores/ - Crea un nuevo vendedor (asigna empresa del usuario)
+    - GET /vendedores/{id}/ - Obtiene un vendedor
+    - PUT /vendedores/{id}/ - Actualiza un vendedor
+    - DELETE /vendedores/{id}/ - Elimina un vendedor
+    - GET /vendedores/{id}/estadisticas/ - Estadísticas del vendedor
+    - GET /vendedores/{id}/ventas/ - Historial de ventas
+    - GET /vendedores/{id}/cotizaciones/ - Historial de cotizaciones
+    - GET /vendedores/{id}/clientes/ - Clientes asignados
+    - GET /vendedores/{id}/comisiones/ - Cálculo de comisiones
+    """
     queryset = Vendedor.objects.all()
     serializer_class = VendedorSerializer
-    permission_classes = [permissions.IsAuthenticated, ActionBasedPermission]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = VendedoresPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['activo', 'usuario']
     search_fields = ['nombre', 'cedula', 'telefono', 'correo']
     ordering_fields = ['nombre', 'fecha_creacion', 'comision_porcentaje']
     ordering = ['nombre']
 
+    def get_permissions(self):
+        """
+        Retorna los permisos requeridos según la acción.
+        """
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), CanGestionarVendedor()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """
+        Retorna el serializer según la acción.
+        """
+        if self.action == 'list':
+            return VendedorListSerializer
+        return VendedorSerializer
+
     def get_queryset(self):
-        """Filtrar vendedores según empresa del usuario"""
-        queryset = super().get_queryset()
-        # Filtros específicos
-        activo = self.request.query_params.get('activo')
-        if activo is not None:
-            queryset = queryset.filter(activo=activo.lower() == 'true')
-        
-        usuario_id = self.request.query_params.get('usuario')
-        if usuario_id:
-            queryset = queryset.filter(usuario_id=usuario_id)
-        
-        return queryset
+        """
+        Filtra por empresa y optimiza con select_related.
+        """
+        return super().get_queryset().select_related('empresa', 'usuario')
+
+    def perform_create(self, serializer):
+        """
+        Guarda el vendedor con empresa y usuario de creación.
+        """
+        super().perform_create(serializer)
+        instance = serializer.instance
+        logger.info(
+            f"Vendedor creado: {instance.nombre} (id={instance.id}) "
+            f"empresa={instance.empresa_id} por usuario {self.request.user.username}"
+        )
+
+    def perform_update(self, serializer):
+        """
+        Actualiza el vendedor y registra el usuario de modificación.
+        """
+        super().perform_update(serializer)
+        instance = serializer.instance
+        logger.info(
+            f"Vendedor actualizado: {instance.nombre} (id={instance.id}) "
+            f"por usuario {self.request.user.username}"
+        )
+
+    def perform_destroy(self, instance):
+        """
+        Elimina el vendedor y registra la acción.
+        """
+        nombre = instance.nombre
+        instance_id = instance.id
+        super().perform_destroy(instance)
+        logger.info(
+            f"Vendedor eliminado: {nombre} (id={instance_id}) "
+            f"por usuario {self.request.user.username}"
+        )
 
     @action(detail=True, methods=['get'])
     def estadisticas(self, request, pk=None):
-        """Obtener estadísticas del vendedor"""
+        """
+        Obtener estadísticas completas del vendedor.
+
+        Returns:
+            Response con datos del vendedor y estadísticas de ventas,
+            cotizaciones y clientes
+        """
         vendedor = self.get_object()
-        from ventas.models import Factura, CotizacionCliente
-        
-        # Estadísticas de ventas
-        facturas = Factura.objects.filter(vendedor=vendedor)
-        total_ventas = facturas.count()
-        monto_total_ventas = facturas.aggregate(total=Sum('total'))['total'] or 0
-        monto_comisiones = (monto_total_ventas * vendedor.comision_porcentaje) / 100
-        
-        # Estadísticas de cotizaciones
-        cotizaciones = CotizacionCliente.objects.filter(vendedor=vendedor)
-        total_cotizaciones = cotizaciones.count()
-        cotizaciones_aprobadas = cotizaciones.filter(estado='APROBADA').count()
-        
-        # Estadísticas de clientes
-        total_clientes = vendedor.clientes.count()
-        
+        estadisticas = ServicioVendedor.obtener_estadisticas_completas(vendedor)
+
+        logger.info(
+            f"Estadísticas consultadas para vendedor {vendedor.nombre} "
+            f"por usuario {request.user.username}"
+        )
+
         return Response({
             'vendedor': VendedorSerializer(vendedor).data,
-            'estadisticas': {
-                'total_ventas': total_ventas,
-                'monto_total_ventas': float(monto_total_ventas),
-                'comision_porcentaje': float(vendedor.comision_porcentaje),
-                'monto_comisiones': float(monto_comisiones),
-                'total_cotizaciones': total_cotizaciones,
-                'cotizaciones_aprobadas': cotizaciones_aprobadas,
-                'total_clientes': total_clientes
-            }
+            'estadisticas': estadisticas
         })
 
     @action(detail=True, methods=['get'])
     def ventas(self, request, pk=None):
-        """Listar ventas del vendedor"""
+        """
+        Listar ventas del vendedor.
+
+        Returns:
+            Response con lista de ventas y estadísticas totales
+        """
         vendedor = self.get_object()
-        from ventas.models import Factura
-        
-        facturas = Factura.objects.filter(vendedor=vendedor).order_by('-fecha')
-        
-        data = [{
-            'id': f.id,
-            'numero': f.numero_factura,
-            'ncf': f.ncf,
-            'cliente': f.cliente.nombre,
-            'fecha': f.fecha,
-            'total': float(f.total),
-            'estado': f.estado,
-            'tipo_venta': f.tipo_venta
-        } for f in facturas]
-        
-        return Response({
-            'vendedor': vendedor.nombre,
-            'total_ventas': len(data),
-            'monto_total': sum(float(v['total']) for v in data),
-            'ventas': data
-        })
+        resultado = ServicioVendedor.obtener_historial_ventas(vendedor)
+
+        logger.info(
+            f"Historial de ventas consultado para vendedor {vendedor.nombre} "
+            f"por usuario {request.user.username}"
+        )
+
+        return Response(resultado)
 
     @action(detail=True, methods=['get'])
     def cotizaciones(self, request, pk=None):
-        """Listar cotizaciones del vendedor"""
+        """
+        Listar cotizaciones del vendedor.
+
+        Returns:
+            Response con lista de cotizaciones y estadísticas totales
+        """
         vendedor = self.get_object()
-        from ventas.models import CotizacionCliente
-        
-        cotizaciones = CotizacionCliente.objects.filter(vendedor=vendedor).order_by('-fecha')
-        
-        data = [{
-            'id': c.id,
-            'cliente': c.cliente.nombre,
-            'fecha': c.fecha,
-            'vigencia': c.vigencia,
-            'total': float(c.total),
-            'estado': c.estado
-        } for c in cotizaciones]
-        
-        return Response({
-            'vendedor': vendedor.nombre,
-            'total_cotizaciones': len(data),
-            'monto_total': sum(float(c['total']) for c in data),
-            'cotizaciones': data
-        })
+        resultado = ServicioVendedor.obtener_historial_cotizaciones(vendedor)
+
+        logger.info(
+            f"Historial de cotizaciones consultado para vendedor {vendedor.nombre} "
+            f"por usuario {request.user.username}"
+        )
+
+        return Response(resultado)
 
     @action(detail=True, methods=['get'])
     def clientes(self, request, pk=None):
-        """Listar clientes asignados al vendedor"""
+        """
+        Listar clientes asignados al vendedor.
+
+        Returns:
+            Response con lista de clientes asignados
+        """
         vendedor = self.get_object()
         clientes = vendedor.clientes.all()
-        
+
         from clientes.serializers import ClienteSerializer
         serializer = ClienteSerializer(clientes, many=True)
-        
+
+        logger.info(
+            f"Clientes consultados para vendedor {vendedor.nombre} "
+            f"por usuario {request.user.username}"
+        )
+
         return Response({
             'vendedor': vendedor.nombre,
             'total_clientes': clientes.count(),
@@ -131,64 +204,56 @@ class VendedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
 
     @action(detail=True, methods=['get'])
     def comisiones(self, request, pk=None):
-        """Calcular comisiones del vendedor en un período"""
+        """
+        Calcular comisiones del vendedor en un período.
+
+        Query Params:
+            fecha_inicio: Fecha de inicio (YYYY-MM-DD)
+            fecha_fin: Fecha de fin (YYYY-MM-DD)
+
+        Returns:
+            Response con resumen y detalle de comisiones
+        """
         vendedor = self.get_object()
-        from ventas.models import Factura
-        
+
         # Obtener parámetros de fecha (opcional)
-        fecha_inicio = request.query_params.get('fecha_inicio')
-        fecha_fin = request.query_params.get('fecha_fin')
-        
-        facturas = Factura.objects.filter(vendedor=vendedor, estado__in=['PAGADA', 'PAGADA_PARCIAL'])
-        
-        if fecha_inicio:
+        fecha_inicio_str = request.query_params.get('fecha_inicio')
+        fecha_fin_str = request.query_params.get('fecha_fin')
+
+        fecha_inicio = None
+        fecha_fin = None
+
+        if fecha_inicio_str:
             try:
-                fecha_inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
-                facturas = facturas.filter(fecha__date__gte=fecha_inicio)
+                fecha_inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
             except ValueError:
                 return Response(
                     {'error': 'Formato de fecha_inicio inválido. Use YYYY-MM-DD'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        
-        if fecha_fin:
+
+        if fecha_fin_str:
             try:
-                fecha_fin = datetime.strptime(fecha_fin, '%Y-%m-%d').date()
-                facturas = facturas.filter(fecha__date__lte=fecha_fin)
+                fecha_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
             except ValueError:
                 return Response(
                     {'error': 'Formato de fecha_fin inválido. Use YYYY-MM-DD'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        
-        # Calcular comisiones
-        monto_total_ventas = facturas.aggregate(total=Sum('total'))['total'] or 0
-        monto_comisiones = (monto_total_ventas * vendedor.comision_porcentaje) / 100
-        
-        # Detalle de comisiones por factura
-        detalle_comisiones = []
-        for factura in facturas:
-            comision_factura = (factura.total * vendedor.comision_porcentaje) / 100
-            detalle_comisiones.append({
-                'factura_id': factura.id,
-                'numero_factura': factura.numero_factura,
-                'fecha': factura.fecha,
-                'cliente': factura.cliente.nombre,
-                'monto_venta': float(factura.total),
-                'comision': float(comision_factura)
-            })
-        
+
+        resultado = ServicioVendedor.calcular_comisiones(vendedor, fecha_inicio, fecha_fin)
+
+        logger.info(
+            f"Comisiones calculadas para vendedor {vendedor.nombre} "
+            f"por usuario {request.user.username}"
+        )
+
         return Response({
             'vendedor': vendedor.nombre,
             'comision_porcentaje': float(vendedor.comision_porcentaje),
             'periodo': {
-                'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d') if fecha_inicio else None,
-                'fecha_fin': fecha_fin.strftime('%Y-%m-%d') if fecha_fin else None
+                'fecha_inicio': fecha_inicio_str,
+                'fecha_fin': fecha_fin_str
             },
-            'resumen': {
-                'total_ventas': facturas.count(),
-                'monto_total_ventas': float(monto_total_ventas),
-                'monto_total_comisiones': float(monto_comisiones)
-            },
-            'detalle': detalle_comisiones
+            **resultado
         })

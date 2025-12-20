@@ -94,6 +94,21 @@ class OrdenCompra(models.Model):
         if self.tasa_cambio <= 0:
             raise ValidationError({'tasa_cambio': 'La tasa de cambio debe ser mayor a cero.'})
 
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'proveedor', 'estado', 'total']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+        super().save(*args, **kwargs)
+
     @property
     def estado_display(self):
         return self.get_estado_display()
@@ -143,6 +158,16 @@ class DetalleOrdenCompra(models.Model):
 
         if self.impuesto < 0:
             raise ValidationError({'impuesto': 'El impuesto no puede ser negativo.'})
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def subtotal(self):

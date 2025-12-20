@@ -1,6 +1,12 @@
 """
-Servicios para manejar la lógica de negocio del inventario
+Servicios para manejar la lógica de negocio del inventario.
+
+Incluye:
+- ServicioInventario: Movimientos, reservas y stock
+- ServicioAlertasInventario: Generación de alertas
+- ServicioKardex: Cálculo de Kardex
 """
+import logging
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -10,6 +16,9 @@ from .models import (
     InventarioProducto, MovimientoInventario, ReservaStock,
     AlertaInventario, Lote
 )
+from .constants import TIPOS_MOVIMIENTO_ENTRADA, TIPOS_MOVIMIENTO_SALIDA
+
+logger = logging.getLogger(__name__)
 
 
 class ServicioInventario:
@@ -63,6 +72,7 @@ class ServicioInventario:
             producto, tipo_movimiento, cantidad, almacen
         )
         if not puede:
+            logger.warning(f"Movimiento rechazado: {mensaje} (producto={producto.id}, almacen={almacen.id})")
             raise ValidationError(mensaje)
         
         # Obtener o crear inventario con bloqueo para evitar condiciones de carrera
@@ -105,7 +115,12 @@ class ServicioInventario:
             inventario.cantidad_disponible -= cantidad
         
         inventario.save()
-        
+
+        logger.info(
+            f"Movimiento registrado: {tipo_movimiento} de {cantidad} unidades "
+            f"(movimiento_id={movimiento.id}, producto={producto.id}, almacen={almacen.id})"
+        )
+
         # Actualizar lote si existe
         if lote:
             if tipo_movimiento in ['ENTRADA_COMPRA', 'ENTRADA_AJUSTE']:
@@ -150,7 +165,8 @@ class ServicioInventario:
             usuario_modificacion=usuario,
             fecha_vencimiento=fecha_vencimiento
         )
-        
+
+        logger.info(f"Reserva creada: {cantidad} unidades (id={reserva.id}, inventario={inventario.id})")
         return reserva
     
     @staticmethod
@@ -159,14 +175,16 @@ class ServicioInventario:
         """Confirma una reserva y la marca como confirmada"""
         reserva.estado = 'CONFIRMADA'
         reserva.save()
+        logger.info(f"Reserva confirmada: id={reserva.id}")
         return reserva
-    
+
     @staticmethod
     @transaction.atomic
     def cancelar_reserva(reserva):
         """Cancela una reserva"""
         reserva.estado = 'CANCELADA'
         reserva.save()
+        logger.info(f"Reserva cancelada: id={reserva.id}")
         return reserva
 
 
@@ -355,12 +373,15 @@ class ServicioAlertasInventario:
         stock_bajo = ServicioAlertasInventario.verificar_stock_bajo()
         vencimientos = ServicioAlertasInventario.verificar_vencimientos()
         stock_excesivo = ServicioAlertasInventario.verificar_stock_excesivo()
-        
+
+        total = stock_bajo + vencimientos + stock_excesivo
+        logger.info(f"Alertas generadas: {total} (stock_bajo={stock_bajo}, vencimientos={vencimientos}, stock_excesivo={stock_excesivo})")
+
         return {
             'stock_bajo': stock_bajo,
             'vencimientos': vencimientos,
             'stock_excesivo': stock_excesivo,
-            'total': stock_bajo + vencimientos + stock_excesivo
+            'total': total
         }
 
 
@@ -407,11 +428,11 @@ class ServicioKardex:
                 filtros,
                 fecha__lt=fecha_desde
             ).aggregate(
-                total_entradas=Sum('cantidad', filter=Q(cantidad__gt=0)),
-                total_salidas=Sum('cantidad', filter=Q(cantidad__lt=0))
+                total_entradas=Sum('cantidad', filter=Q(tipo_movimiento__in=TIPOS_MOVIMIENTO_ENTRADA)),
+                total_salidas=Sum('cantidad', filter=Q(tipo_movimiento__in=TIPOS_MOVIMIENTO_SALIDA))
             )
             entradas = movimientos_anteriores['total_entradas'] or Decimal('0')
-            salidas = abs(movimientos_anteriores['total_salidas'] or Decimal('0'))
+            salidas = movimientos_anteriores['total_salidas'] or Decimal('0')
             saldo_inicial['cantidad'] = entradas - salidas
 
         # Obtener movimientos del período
@@ -432,14 +453,15 @@ class ServicioKardex:
         resultado_movimientos = []
 
         for mov in movimientos:
-            if mov.cantidad > 0:
+            es_entrada = mov.tipo_movimiento in TIPOS_MOVIMIENTO_ENTRADA
+            if es_entrada:
                 entrada = mov.cantidad
                 salida = Decimal('0')
+                saldo_acumulado += mov.cantidad
             else:
                 entrada = Decimal('0')
-                salida = abs(mov.cantidad)
-
-            saldo_acumulado += mov.cantidad
+                salida = mov.cantidad
+                saldo_acumulado -= mov.cantidad
 
             resultado_movimientos.append({
                 'id': mov.id,

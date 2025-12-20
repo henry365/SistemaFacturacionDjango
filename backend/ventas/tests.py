@@ -35,6 +35,11 @@ class CotizacionClienteModelTest(TestCase):
             empresa=self.empresa,
             nombre='Vendedor Test'
         )
+        self.user = User.objects.create_user(
+            username='testuser_cotizacion',
+            password='test123',
+            empresa=self.empresa
+        )
 
     def test_crear_cotizacion(self):
         """Test: Crear cotización"""
@@ -43,7 +48,8 @@ class CotizacionClienteModelTest(TestCase):
             cliente=self.cliente,
             vendedor=self.vendedor,
             vigencia=date.today() + timedelta(days=30),
-            total=Decimal('5000.00')
+            total=Decimal('5000.00'),
+            usuario=self.user
         )
         self.assertEqual(cotizacion.estado, 'PENDIENTE')
 
@@ -52,7 +58,8 @@ class CotizacionClienteModelTest(TestCase):
         cotizacion = CotizacionCliente.objects.create(
             empresa=self.empresa,
             cliente=self.cliente,
-            vigencia=date.today() + timedelta(days=30)
+            vigencia=date.today() + timedelta(days=30),
+            usuario=self.user
         )
         self.assertIn('Cliente Test', str(cotizacion))
 
@@ -418,8 +425,8 @@ class VentasAPITest(APITestCase):
             rol='facturador'
         )
 
-        # Asignar permisos
-        for model in [CotizacionCliente, Factura, PagoCaja, NotaCredito, NotaDebito, DevolucionVenta]:
+        # Asignar permisos estándar
+        for model in [CotizacionCliente, Factura, PagoCaja, NotaCredito, NotaDebito, DevolucionVenta, ListaEsperaProducto]:
             content_type = ContentType.objects.get_for_model(model)
             for codename in ['view', 'add', 'change', 'delete']:
                 perm_codename = f'{codename}_{model._meta.model_name}'
@@ -428,6 +435,24 @@ class VentasAPITest(APITestCase):
                     self.user.user_permissions.add(perm)
                 except Permission.DoesNotExist:
                     pass
+
+        # Asignar permisos personalizados de gestión
+        permisos_custom = [
+            ('ventas', 'cotizacioncliente', 'gestionar_cotizacion'),
+            ('ventas', 'factura', 'gestionar_factura'),
+            ('ventas', 'pagocaja', 'gestionar_pago_caja'),
+            ('ventas', 'notacredito', 'gestionar_nota_credito'),
+            ('ventas', 'notadebito', 'gestionar_nota_debito'),
+            ('ventas', 'devolucionventa', 'gestionar_devolucion_venta'),
+            ('ventas', 'listaesperaproducto', 'gestionar_lista_espera'),
+        ]
+        for app_label, model_name, codename in permisos_custom:
+            try:
+                content_type = ContentType.objects.get(app_label=app_label, model=model_name)
+                perm = Permission.objects.get(codename=codename, content_type=content_type)
+                self.user.user_permissions.add(perm)
+            except (ContentType.DoesNotExist, Permission.DoesNotExist):
+                pass
 
         self.cliente = Cliente.objects.create(
             empresa=self.empresa,
@@ -532,6 +557,11 @@ class ListaEsperaModelTest(TestCase):
             nombre='Producto Test',
             precio_venta_base=Decimal('100.00')
         )
+        self.user = User.objects.create_user(
+            username='testuser_lista',
+            password='test123',
+            empresa=self.empresa
+        )
 
     def test_crear_lista_espera(self):
         """Test: Crear entrada en lista de espera"""
@@ -539,7 +569,8 @@ class ListaEsperaModelTest(TestCase):
             empresa=self.empresa,
             cliente=self.cliente,
             producto=self.producto,
-            cantidad_solicitada=Decimal('10')
+            cantidad_solicitada=Decimal('10'),
+            usuario=self.user
         )
         self.assertEqual(lista.estado, 'PENDIENTE')
         self.assertEqual(lista.prioridad, 'NORMAL')
@@ -550,7 +581,8 @@ class ListaEsperaModelTest(TestCase):
             empresa=self.empresa,
             cliente=self.cliente,
             producto=self.producto,
-            cantidad_solicitada=Decimal('10')
+            cantidad_solicitada=Decimal('10'),
+            usuario=self.user
         )
         self.assertIn('Cliente Test', str(lista))
         self.assertIn('Producto Test', str(lista))

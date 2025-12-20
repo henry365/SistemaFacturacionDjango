@@ -149,6 +149,20 @@ class UserSerializer(serializers.ModelSerializer):
                     })
         return data
 
+
+class UserListSerializer(serializers.ModelSerializer):
+    """Serializer optimizado para listados de usuarios"""
+    empresa_nombre = serializers.ReadOnlyField(source='empresa.nombre')
+    rol_display = serializers.CharField(source='get_rol_display', read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'rol', 'rol_display', 'empresa_nombre', 'is_active', 'date_joined'
+        )
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
     """Serializer para crear usuarios con password"""
     password = serializers.CharField(write_only=True, required=True, min_length=8)

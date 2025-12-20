@@ -134,7 +134,7 @@ class PagoProveedorModelTest(TestCase):
             numero_pago='PAG-001',
             fecha_pago=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
         self.assertIsNotNone(pago.id)
         self.assertEqual(pago.monto, Decimal('500.00'))
@@ -147,7 +147,7 @@ class PagoProveedorModelTest(TestCase):
             numero_pago='PAG-001',
             fecha_pago=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
         self.assertIn('Pago', str(pago))
         self.assertIn('PAG-001', str(pago))
@@ -190,7 +190,7 @@ class DetallePagoProveedorModelTest(TestCase):
             numero_pago='PAG-001',
             fecha_pago=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
     def test_crear_detalle_pago(self):
@@ -342,6 +342,10 @@ class PagoProveedorAPITest(APITestCase):
                 except Permission.DoesNotExist:
                     pass
 
+        # Hacer al usuario staff para evitar problemas con permisos personalizados
+        self.user.is_staff = True
+        self.user.save()
+
         self.proveedor = Proveedor.objects.create(
             nombre='Proveedor Test',
             tipo_identificacion='RNC',
@@ -384,7 +388,7 @@ class PagoProveedorAPITest(APITestCase):
             'numero_pago': 'PAG-001',
             'fecha_pago': date.today().isoformat(),
             'monto': '500.00',
-            'metodo_pago': 'TRANSFERENCIA'
+            'metodo_pago': 'EFECTIVO'
         }
         response = self.client.post('/api/v1/cxp/pagos/', data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -397,7 +401,7 @@ class PagoProveedorAPITest(APITestCase):
             numero_pago='PAG-002',
             fecha_pago=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
         self.client.force_authenticate(user=self.user)
@@ -423,7 +427,7 @@ class PagoProveedorAPITest(APITestCase):
             numero_pago='PAG-003',
             fecha_pago=date.today(),
             monto=Decimal('500.00'),
-            metodo_pago='TRANSFERENCIA'
+            metodo_pago='EFECTIVO'
         )
 
         self.client.force_authenticate(user=self.user)

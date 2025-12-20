@@ -14,9 +14,16 @@ from usuarios.models import User
 class CategoriaModelTest(TestCase):
     """Tests para el modelo Categoria"""
 
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+
     def test_crear_categoria(self):
         """Test: Crear categoría"""
         categoria = Categoria.objects.create(
+            empresa=self.empresa,
             nombre='Electrónicos',
             descripcion='Productos electrónicos'
         )
@@ -25,32 +32,52 @@ class CategoriaModelTest(TestCase):
 
     def test_categoria_str(self):
         """Test: Representación string de categoría"""
-        categoria = Categoria.objects.create(nombre='Ropa')
+        categoria = Categoria.objects.create(empresa=self.empresa, nombre='Ropa')
         self.assertEqual(str(categoria), 'Ropa')
 
     def test_nombre_normalizado(self):
         """Test: Nombre se normaliza (strip)"""
-        categoria = Categoria(nombre='  Electrónicos  ')
+        categoria = Categoria(empresa=self.empresa, nombre='  Electrónicos  ')
         categoria.clean()
         self.assertEqual(categoria.nombre, 'Electrónicos')
 
     def test_nombre_vacio_falla(self):
         """Test: Nombre vacío falla validación"""
-        categoria = Categoria(nombre='   ')
+        categoria = Categoria(empresa=self.empresa, nombre='   ')
         with self.assertRaises(ValidationError) as context:
             categoria.clean()
         self.assertIn('nombre', context.exception.message_dict)
+
+    def test_unicidad_nombre_por_empresa(self):
+        """Test: Nombre único por empresa"""
+        Categoria.objects.create(empresa=self.empresa, nombre='Electrónicos')
+        categoria2 = Categoria(empresa=self.empresa, nombre='Electrónicos')
+        with self.assertRaises(ValidationError) as context:
+            categoria2.clean()
+        self.assertIn('nombre', context.exception.message_dict)
+
+    def test_mismo_nombre_diferentes_empresas(self):
+        """Test: Mismo nombre en diferentes empresas es válido"""
+        empresa2 = Empresa.objects.create(nombre='Empresa 2', rnc='987654321')
+        Categoria.objects.create(empresa=self.empresa, nombre='Electrónicos')
+        categoria2 = Categoria.objects.create(empresa=empresa2, nombre='Electrónicos')
+        self.assertEqual(categoria2.nombre, 'Electrónicos')
 
 
 class ProductoModelTest(TestCase):
     """Tests para el modelo Producto"""
 
     def setUp(self):
-        self.categoria = Categoria.objects.create(nombre='Test')
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+        self.categoria = Categoria.objects.create(empresa=self.empresa, nombre='Test')
 
     def test_crear_producto_basico(self):
         """Test: Crear producto básico"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='PROD-001',
             nombre='Producto Test',
             precio_venta_base=Decimal('100.00')
@@ -64,6 +91,7 @@ class ProductoModelTest(TestCase):
     def test_crear_producto_servicio(self):
         """Test: Crear producto tipo servicio"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='SERV-001',
             nombre='Servicio Test',
             precio_venta_base=Decimal('500.00'),
@@ -75,6 +103,7 @@ class ProductoModelTest(TestCase):
     def test_crear_producto_activo_fijo(self):
         """Test: Crear producto tipo activo fijo"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='ACTIVO-001',
             nombre='Computadora',
             precio_venta_base=Decimal('25000.00'),
@@ -86,6 +115,7 @@ class ProductoModelTest(TestCase):
     def test_producto_str(self):
         """Test: Representación string de producto"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='Test Product',
             precio_venta_base=Decimal('100.00')
@@ -95,6 +125,7 @@ class ProductoModelTest(TestCase):
     def test_validacion_precio_negativo(self):
         """Test: Precio negativo falla validación"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='Test',
             precio_venta_base=Decimal('-100.00')
@@ -106,6 +137,7 @@ class ProductoModelTest(TestCase):
     def test_validacion_itbis_rango(self):
         """Test: ITBIS fuera de rango falla validación"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='Test',
             precio_venta_base=Decimal('100.00'),
@@ -118,6 +150,7 @@ class ProductoModelTest(TestCase):
     def test_validacion_descuento_rango(self):
         """Test: Descuento fuera de rango falla validación"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='Test',
             precio_venta_base=Decimal('100.00'),
@@ -130,6 +163,7 @@ class ProductoModelTest(TestCase):
     def test_producto_exento_itbis_cero(self):
         """Test: Producto exento tiene ITBIS en 0"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='EXENTO-001',
             nombre='Libro',
             precio_venta_base=Decimal('500.00'),
@@ -142,6 +176,7 @@ class ProductoModelTest(TestCase):
     def test_producto_sin_garantia_meses_cero(self):
         """Test: Producto sin garantía tiene meses en 0"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='Test',
             precio_venta_base=Decimal('100.00'),
@@ -154,6 +189,7 @@ class ProductoModelTest(TestCase):
     def test_producto_con_garantia(self):
         """Test: Producto con garantía"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='GAR-001',
             nombre='Electrodoméstico',
             precio_venta_base=Decimal('5000.00'),
@@ -166,6 +202,7 @@ class ProductoModelTest(TestCase):
     def test_nombre_normalizado(self):
         """Test: Nombre se normaliza (strip)"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='TEST-001',
             nombre='  Producto Test  ',
             precio_venta_base=Decimal('100.00')
@@ -176,6 +213,7 @@ class ProductoModelTest(TestCase):
     def test_sku_normalizado(self):
         """Test: SKU se normaliza (strip)"""
         producto = Producto(
+            empresa=self.empresa,
             codigo_sku='  TEST-001  ',
             nombre='Test',
             precio_venta_base=Decimal('100.00')
@@ -185,9 +223,10 @@ class ProductoModelTest(TestCase):
 
     def test_producto_con_categorias(self):
         """Test: Producto con múltiples categorías"""
-        cat1 = Categoria.objects.create(nombre='Electrónicos')
-        cat2 = Categoria.objects.create(nombre='Hogar')
+        cat1 = Categoria.objects.create(empresa=self.empresa, nombre='Electrónicos')
+        cat2 = Categoria.objects.create(empresa=self.empresa, nombre='Hogar')
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='MULTI-001',
             nombre='TV Smart',
             precio_venta_base=Decimal('15000.00')
@@ -195,13 +234,55 @@ class ProductoModelTest(TestCase):
         producto.categorias.add(cat1, cat2)
         self.assertEqual(producto.categorias.count(), 2)
 
+    def test_unicidad_sku_por_empresa(self):
+        """Test: SKU único por empresa"""
+        Producto.objects.create(
+            empresa=self.empresa,
+            codigo_sku='PROD-001',
+            nombre='Producto 1',
+            precio_venta_base=Decimal('100.00')
+        )
+        producto2 = Producto(
+            empresa=self.empresa,
+            codigo_sku='PROD-001',
+            nombre='Producto 2',
+            precio_venta_base=Decimal('200.00')
+        )
+        with self.assertRaises(ValidationError) as context:
+            producto2.clean()
+        self.assertIn('codigo_sku', context.exception.message_dict)
+
+    def test_mismo_sku_diferentes_empresas(self):
+        """Test: Mismo SKU en diferentes empresas es válido"""
+        empresa2 = Empresa.objects.create(nombre='Empresa 2', rnc='987654321')
+        Producto.objects.create(
+            empresa=self.empresa,
+            codigo_sku='PROD-001',
+            nombre='Producto 1',
+            precio_venta_base=Decimal('100.00')
+        )
+        producto2 = Producto.objects.create(
+            empresa=empresa2,
+            codigo_sku='PROD-001',
+            nombre='Producto 2',
+            precio_venta_base=Decimal('200.00')
+        )
+        self.assertEqual(producto2.codigo_sku, 'PROD-001')
+
 
 class ProductoSerializerTest(TestCase):
     """Tests para el serializer de Producto"""
 
+    def setUp(self):
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+
     def test_calculo_precio_final(self):
         """Prueba que el precio final se calcule correctamente con el ITBIS"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku="TEST-001",
             nombre="Producto Test",
             precio_venta_base=Decimal('100.00'),
@@ -215,11 +296,13 @@ class ProductoSerializerTest(TestCase):
     def test_calculo_precio_final_con_descuento(self):
         """Prueba precio final con descuento promocional del 10%"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku="TEST-DESC",
             nombre="Producto Descuento",
             precio_venta_base=Decimal('100.00'),
             impuesto_itbis=Decimal('18.00'),
             porcentaje_descuento_promocional=Decimal('10.00'),
+            porcentaje_descuento_maximo=Decimal('15.00'),  # Debe ser >= promocional
             tipo_producto='ALMACENABLE'
         )
         serializer = ProductoSerializer(producto)
@@ -232,6 +315,7 @@ class ProductoSerializerTest(TestCase):
     def test_calculo_precio_final_producto_exento(self):
         """Prueba precio final de producto exento (sin ITBIS)"""
         producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku="EXENTO-001",
             nombre="Libro",
             precio_venta_base=Decimal('500.00'),
@@ -325,11 +409,32 @@ class ProductoAPITest(APITestCase):
             perm = Permission.objects.get(codename=codename, content_type=content_type_cat)
             self.user.user_permissions.add(perm)
 
+        # Asignar permisos personalizados del módulo productos
+        permisos_personalizados = [
+            ('productos', 'categoria', 'gestionar_categoria'),
+            ('productos', 'producto', 'gestionar_producto'),
+            ('productos', 'producto', 'cargar_catalogo'),
+            ('productos', 'imagenproducto', 'gestionar_imagenproducto'),
+            ('productos', 'referenciascruzadas', 'gestionar_referenciascruzadas'),
+        ]
+        for app_label, model_name, codename in permisos_personalizados:
+            try:
+                content_type = ContentType.objects.get(app_label=app_label, model=model_name)
+                perm = Permission.objects.get(codename=codename, content_type=content_type)
+                self.user.user_permissions.add(perm)
+            except (ContentType.DoesNotExist, Permission.DoesNotExist):
+                pass
+
+        # Refrescar usuario para limpiar cache de permisos
+        self.user = User.objects.get(pk=self.user.pk)
+
         self.categoria = Categoria.objects.create(
+            empresa=self.empresa,
             nombre='Electrónicos'
         )
 
         self.producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='PROD-001',
             nombre='Laptop',
             precio_venta_base=Decimal('25000.00'),
@@ -360,6 +465,9 @@ class ProductoAPITest(APITestCase):
         response = self.client.post('/api/v1/productos/', data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['nombre'], 'Nuevo Producto')
+        # Verificar que se asignó la empresa del usuario
+        producto = Producto.objects.get(codigo_sku='NEW-001')
+        self.assertEqual(producto.empresa, self.empresa)
 
     def test_obtener_producto(self):
         """Test: Obtener producto por ID"""
@@ -424,15 +532,20 @@ class ProductoAPITest(APITestCase):
         }
         response = self.client.post('/api/v1/categorias/', data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # Verificar que se asignó la empresa del usuario
+        categoria = Categoria.objects.get(nombre='Nueva Categoría')
+        self.assertEqual(categoria.empresa, self.empresa)
 
     def test_ordenar_productos_por_nombre(self):
         """Test: Ordenar productos por nombre"""
         Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='AAA-001',
             nombre='AAA Producto',
             precio_venta_base=Decimal('100.00')
         )
         Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='ZZZ-001',
             nombre='ZZZ Producto',
             precio_venta_base=Decimal('100.00')
@@ -443,6 +556,25 @@ class ProductoAPITest(APITestCase):
         nombres = [p['nombre'] for p in response.data['results']]
         self.assertEqual(nombres, sorted(nombres))
 
+    def test_aislamiento_multi_tenancy(self):
+        """Test: Usuario solo ve productos de su empresa"""
+        # Crear otra empresa con su propio producto
+        empresa2 = Empresa.objects.create(nombre='Otra Empresa', rnc='987654321')
+        Producto.objects.create(
+            empresa=empresa2,
+            codigo_sku='OTRA-001',
+            nombre='Producto Otra Empresa',
+            precio_venta_base=Decimal('100.00')
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/v1/productos/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verificar que no se ve el producto de otra empresa
+        codigos = [p['codigo_sku'] for p in response.data['results']]
+        self.assertNotIn('OTRA-001', codigos)
+
 
 # ======================= TESTS IMAGEN PRODUCTO =======================
 
@@ -452,7 +584,12 @@ class ImagenProductoModelTest(TestCase):
     def setUp(self):
         from productos.models import ImagenProducto
         self.ImagenProducto = ImagenProducto
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
         self.producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='IMG-001',
             nombre='Producto con Imagen',
             precio_venta_base=Decimal('100.00')
@@ -463,6 +600,7 @@ class ImagenProductoModelTest(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         # Crear una imagen falsa
         imagen = self.ImagenProducto(
+            empresa=self.empresa,
             producto=self.producto,
             titulo='Imagen Principal',
             orden=0
@@ -475,6 +613,7 @@ class ImagenProductoModelTest(TestCase):
     def test_imagen_str(self):
         """Test: Representación string de imagen"""
         imagen = self.ImagenProducto(
+            empresa=self.empresa,
             producto=self.producto,
             titulo='Imagen Test',
             orden=1
@@ -486,15 +625,15 @@ class ImagenProductoModelTest(TestCase):
 
     def test_orden_imagenes(self):
         """Test: Orden de imágenes"""
-        img1 = self.ImagenProducto(producto=self.producto, titulo='Primera', orden=0)
+        img1 = self.ImagenProducto(empresa=self.empresa, producto=self.producto, titulo='Primera', orden=0)
         img1.imagen = 'test1.jpg'
         img1.save()
 
-        img2 = self.ImagenProducto(producto=self.producto, titulo='Segunda', orden=1)
+        img2 = self.ImagenProducto(empresa=self.empresa, producto=self.producto, titulo='Segunda', orden=1)
         img2.imagen = 'test2.jpg'
         img2.save()
 
-        img3 = self.ImagenProducto(producto=self.producto, titulo='Tercera', orden=2)
+        img3 = self.ImagenProducto(empresa=self.empresa, producto=self.producto, titulo='Tercera', orden=2)
         img3.imagen = 'test3.jpg'
         img3.save()
 
@@ -502,6 +641,17 @@ class ImagenProductoModelTest(TestCase):
         self.assertEqual(imagenes[0].titulo, 'Primera')
         self.assertEqual(imagenes[1].titulo, 'Segunda')
         self.assertEqual(imagenes[2].titulo, 'Tercera')
+
+    def test_empresa_heredada_de_producto(self):
+        """Test: Empresa se hereda del producto si no se especifica"""
+        imagen = self.ImagenProducto(
+            producto=self.producto,
+            titulo='Imagen Sin Empresa',
+            orden=0
+        )
+        imagen.imagen = 'test.jpg'
+        imagen.save()
+        self.assertEqual(imagen.empresa, self.empresa)
 
 
 class ImagenProductoAPITest(APITestCase):
@@ -521,11 +671,13 @@ class ImagenProductoAPITest(APITestCase):
             empresa=self.empresa
         )
         self.producto = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='API-IMG-001',
             nombre='Producto API Imagen',
             precio_venta_base=Decimal('100.00')
         )
         self.imagen = self.ImagenProducto(
+            empresa=self.empresa,
             producto=self.producto,
             titulo='Imagen Test',
             orden=0
@@ -549,7 +701,7 @@ class ImagenProductoAPITest(APITestCase):
     def test_marcar_principal(self):
         """Test: Marcar imagen como principal"""
         # Crear segunda imagen
-        img2 = self.ImagenProducto(producto=self.producto, titulo='Segunda', orden=1)
+        img2 = self.ImagenProducto(empresa=self.empresa, producto=self.producto, titulo='Segunda', orden=1)
         img2.imagen = 'test2.jpg'
         img2.save()
 
@@ -569,12 +721,18 @@ class ReferenciasCruzadasModelTest(TestCase):
     def setUp(self):
         from productos.models import ReferenciasCruzadas
         self.ReferenciasCruzadas = ReferenciasCruzadas
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
         self.producto1 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='REF-001',
             nombre='Producto 1',
             precio_venta_base=Decimal('100.00')
         )
         self.producto2 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='REF-002',
             nombre='Producto 2',
             precio_venta_base=Decimal('150.00')
@@ -583,6 +741,7 @@ class ReferenciasCruzadasModelTest(TestCase):
     def test_crear_referencia_relacionado(self):
         """Test: Crear referencia de producto relacionado"""
         ref = self.ReferenciasCruzadas.objects.create(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=self.producto2,
             tipo='RELACIONADO'
@@ -594,6 +753,7 @@ class ReferenciasCruzadasModelTest(TestCase):
     def test_crear_referencia_sustituto(self):
         """Test: Crear referencia de producto sustituto"""
         ref = self.ReferenciasCruzadas.objects.create(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=self.producto2,
             tipo='SUSTITUTO'
@@ -603,6 +763,7 @@ class ReferenciasCruzadasModelTest(TestCase):
     def test_referencia_str(self):
         """Test: Representación string de referencia"""
         ref = self.ReferenciasCruzadas.objects.create(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=self.producto2,
             tipo='ACCESORIO'
@@ -614,8 +775,37 @@ class ReferenciasCruzadasModelTest(TestCase):
     def test_validacion_mismo_producto(self):
         """Test: No se puede crear referencia al mismo producto"""
         ref = self.ReferenciasCruzadas(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=self.producto1,
+            tipo='RELACIONADO'
+        )
+        with self.assertRaises(ValidationError):
+            ref.clean()
+
+    def test_empresa_heredada_de_producto_origen(self):
+        """Test: Empresa se hereda del producto origen si no se especifica"""
+        ref = self.ReferenciasCruzadas(
+            producto_origen=self.producto1,
+            producto_destino=self.producto2,
+            tipo='RELACIONADO'
+        )
+        ref.save()
+        self.assertEqual(ref.empresa, self.empresa)
+
+    def test_validacion_productos_misma_empresa(self):
+        """Test: Productos deben pertenecer a la misma empresa"""
+        empresa2 = Empresa.objects.create(nombre='Otra Empresa', rnc='987654321')
+        producto_otra = Producto.objects.create(
+            empresa=empresa2,
+            codigo_sku='OTRA-001',
+            nombre='Producto Otra Empresa',
+            precio_venta_base=Decimal('100.00')
+        )
+        ref = self.ReferenciasCruzadas(
+            empresa=self.empresa,
+            producto_origen=self.producto1,
+            producto_destino=producto_otra,
             tipo='RELACIONADO'
         )
         with self.assertRaises(ValidationError):
@@ -639,16 +829,19 @@ class ReferenciasCruzadasAPITest(APITestCase):
             empresa=self.empresa
         )
         self.producto1 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='API-REF-001',
             nombre='Producto API 1',
             precio_venta_base=Decimal('100.00')
         )
         self.producto2 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='API-REF-002',
             nombre='Producto API 2',
             precio_venta_base=Decimal('150.00')
         )
         self.referencia = self.ReferenciasCruzadas.objects.create(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=self.producto2,
             tipo='RELACIONADO'
@@ -664,6 +857,7 @@ class ReferenciasCruzadasAPITest(APITestCase):
     def test_crear_referencia(self):
         """Test: Crear referencia"""
         producto3 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='API-REF-003',
             nombre='Producto API 3',
             precio_venta_base=Decimal('200.00')
@@ -687,11 +881,13 @@ class ReferenciasCruzadasAPITest(APITestCase):
         """Test: Endpoint sustitutos"""
         # Crear un sustituto
         producto3 = Producto.objects.create(
+            empresa=self.empresa,
             codigo_sku='SUST-001',
             nombre='Sustituto',
             precio_venta_base=Decimal('120.00')
         )
         self.ReferenciasCruzadas.objects.create(
+            empresa=self.empresa,
             producto_origen=self.producto1,
             producto_destino=producto3,
             tipo='SUSTITUTO'

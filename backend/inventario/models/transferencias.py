@@ -3,8 +3,13 @@ Modelos para transferencias de inventario entre almacenes.
 """
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from productos.models import Producto
 import uuid
+
+from ..constants import (
+    ERROR_CANTIDAD_NEGATIVA, ERROR_ALMACEN_NO_PERTENECE_EMPRESA,
+)
 
 
 class TransferenciaInventario(models.Model):
@@ -82,6 +87,42 @@ class TransferenciaInventario(models.Model):
         verbose_name_plural = 'Transferencias de Inventario'
         ordering = ['-fecha_solicitud']
         unique_together = ('empresa', 'numero_transferencia')
+        indexes = [
+            models.Index(fields=['empresa', 'estado']),
+            models.Index(fields=['empresa', '-fecha_solicitud']),
+        ]
+        permissions = [
+            ('gestionar_transferenciainventario', 'Puede gestionar transferencias'),
+        ]
+
+    def clean(self):
+        """Validaciones de negocio para TransferenciaInventario."""
+        errors = {}
+
+        # Validar que almacenes pertenezcan a la empresa
+        if self.empresa:
+            if self.almacen_origen and self.almacen_origen.empresa and self.almacen_origen.empresa != self.empresa:
+                errors['almacen_origen'] = ERROR_ALMACEN_NO_PERTENECE_EMPRESA
+
+            if self.almacen_destino and self.almacen_destino.empresa and self.almacen_destino.empresa != self.empresa:
+                errors['almacen_destino'] = ERROR_ALMACEN_NO_PERTENECE_EMPRESA
+
+        # Validar que origen y destino sean diferentes
+        if self.almacen_origen and self.almacen_destino and self.almacen_origen == self.almacen_destino:
+            errors['almacen_destino'] = 'El almacén destino debe ser diferente al origen'
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Guarda con validaciones."""
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = ['empresa', 'almacen_origen', 'almacen_destino', 'estado']
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Transferencia {self.numero_transferencia} - {self.almacen_origen} → {self.almacen_destino}"

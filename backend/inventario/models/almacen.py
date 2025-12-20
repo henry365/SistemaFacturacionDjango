@@ -3,12 +3,21 @@ Modelos de almacén e inventario de productos.
 """
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.db.models import Sum, F, GeneratedField, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
 from productos.models import Producto
 from datetime import timedelta
 import uuid
+
+from ..constants import (
+    ERROR_NOMBRE_VACIO, ERROR_NOMBRE_REQUERIDO, ERROR_NOMBRE_DUPLICADO_EMPRESA,
+    ERROR_CANTIDAD_NEGATIVA, ERROR_COSTO_NEGATIVO,
+    ERROR_STOCK_MINIMO_MAYOR_MAXIMO, ERROR_PUNTO_REORDEN_MENOR_MINIMO,
+    ERROR_PUNTO_REORDEN_MAYOR_MAXIMO,
+    ERROR_PRODUCTO_NO_PERTENECE_EMPRESA, ERROR_ALMACEN_NO_PERTENECE_EMPRESA,
+)
 
 
 class InventarioProductoQuerySet(models.QuerySet):
@@ -124,6 +133,46 @@ class Almacen(models.Model):
         verbose_name = 'Almacén'
         verbose_name_plural = 'Almacenes'
         unique_together = ('empresa', 'nombre')
+        indexes = [
+            models.Index(fields=['empresa', 'activo']),
+            models.Index(fields=['empresa', 'nombre']),
+        ]
+        permissions = [
+            ('gestionar_almacen', 'Puede gestionar almacenes'),
+        ]
+
+    def clean(self):
+        """Validaciones de negocio para Almacen."""
+        errors = {}
+
+        # Validar nombre no vacío
+        if self.nombre:
+            self.nombre = self.nombre.strip()
+            if not self.nombre:
+                errors['nombre'] = ERROR_NOMBRE_VACIO
+        else:
+            errors['nombre'] = ERROR_NOMBRE_REQUERIDO
+
+        # Validar unicidad de nombre por empresa
+        if self.nombre and self.empresa:
+            qs = type(self).objects.filter(empresa=self.empresa, nombre=self.nombre)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                errors['nombre'] = ERROR_NOMBRE_DUPLICADO_EMPRESA
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Guarda con validaciones."""
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = ['nombre', 'empresa', 'activo']
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nombre
@@ -205,7 +254,62 @@ class InventarioProducto(models.Model):
         indexes = [
             models.Index(fields=['producto', 'almacen']),
             models.Index(fields=['cantidad_disponible']),
+            models.Index(fields=['empresa', 'almacen']),
         ]
+        permissions = [
+            ('gestionar_inventarioproducto', 'Puede gestionar inventario'),
+        ]
+
+    def clean(self):
+        """Validaciones de negocio para InventarioProducto."""
+        errors = {}
+
+        # Validar que producto y almacen pertenezcan a la empresa
+        if self.producto and self.almacen and self.empresa:
+            if hasattr(self.producto, 'empresa') and self.producto.empresa and self.producto.empresa != self.empresa:
+                errors['producto'] = ERROR_PRODUCTO_NO_PERTENECE_EMPRESA
+
+            if self.almacen.empresa and self.almacen.empresa != self.empresa:
+                errors['almacen'] = ERROR_ALMACEN_NO_PERTENECE_EMPRESA
+
+        # Validar que cantidad_disponible no sea negativa
+        if self.cantidad_disponible < 0:
+            errors['cantidad_disponible'] = ERROR_CANTIDAD_NEGATIVA
+
+        # Validar stock_minimo <= stock_maximo
+        if self.stock_minimo > 0 and self.stock_maximo > 0:
+            if self.stock_minimo > self.stock_maximo:
+                errors['stock_minimo'] = ERROR_STOCK_MINIMO_MAYOR_MAXIMO
+
+        # Validar punto_reorden
+        if self.punto_reorden > 0:
+            if self.stock_minimo > 0 and self.punto_reorden < self.stock_minimo:
+                errors['punto_reorden'] = ERROR_PUNTO_REORDEN_MENOR_MINIMO
+            if self.stock_maximo > 0 and self.punto_reorden > self.stock_maximo:
+                errors['punto_reorden'] = ERROR_PUNTO_REORDEN_MAYOR_MAXIMO
+
+        # Validar costos no negativos
+        if self.costo_promedio < 0:
+            errors['costo_promedio'] = ERROR_COSTO_NEGATIVO
+        if self.costo_unitario_actual < 0:
+            errors['costo_unitario_actual'] = ERROR_COSTO_NEGATIVO
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Guarda con validaciones."""
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = [
+            'empresa', 'producto', 'almacen', 'cantidad_disponible',
+            'stock_minimo', 'stock_maximo', 'punto_reorden',
+            'costo_promedio', 'costo_unitario_actual'
+        ]
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.producto} en {self.almacen}: {self.cantidad_disponible}"
@@ -237,6 +341,7 @@ class InventarioProducto(models.Model):
 
     def actualizar_costo_promedio(self, nueva_cantidad, nuevo_costo):
         """Actualiza el costo promedio usando método de promedio ponderado."""
+        from decimal import Decimal, ROUND_HALF_UP
         if self.cantidad_disponible == 0:
             self.costo_promedio = nuevo_costo
             self.costo_unitario_actual = nuevo_costo
@@ -244,7 +349,9 @@ class InventarioProducto(models.Model):
             total_valor_actual = self.cantidad_disponible * self.costo_promedio
             total_valor_nuevo = nueva_cantidad * nuevo_costo
             cantidad_total = self.cantidad_disponible + nueva_cantidad
-            self.costo_promedio = (total_valor_actual + total_valor_nuevo) / cantidad_total
+            # Redondear a 4 decimales para evitar exceder max_digits
+            nuevo_promedio = (total_valor_actual + total_valor_nuevo) / cantidad_total
+            self.costo_promedio = nuevo_promedio.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
             self.costo_unitario_actual = self.costo_promedio
         self.save()
 

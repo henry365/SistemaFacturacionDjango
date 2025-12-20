@@ -1,14 +1,18 @@
 """
 Views para DGII (Comprobantes Fiscales)
+
+Incluye gestión de tipos de comprobante, secuencias NCF,
+y generación de reportes fiscales (606, 607, 608).
 """
+import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
 from django.db import transaction
-from django.utils import timezone
 from django.http import HttpResponse
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 import csv
 import io
@@ -16,52 +20,194 @@ import io
 from core.mixins import EmpresaFilterMixin
 from .models import TipoComprobante, SecuenciaNCF
 from .serializers import (
-    TipoComprobanteSerializer,
-    SecuenciaNCFSerializer,
+    TipoComprobanteSerializer, TipoComprobanteListSerializer,
+    SecuenciaNCFSerializer, SecuenciaNCFListSerializer,
     GenerarNCFSerializer
 )
+from .permissions import (
+    CanGenerarNCF, CanGenerarReporte606, CanGenerarReporte607,
+    CanGenerarReporte608, CanGestionarTipoComprobante, CanGestionarSecuencia
+)
+from .constants import (
+    PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, PAGE_SIZE_REPORTES,
+    TIPO_IDENTIFICACION_RNC, TIPO_IDENTIFICACION_CEDULA,
+    TIPO_IDENTIFICACION_OTRO, LONGITUD_RNC, LONGITUD_CEDULA,
+    ERROR_SECUENCIA_NO_ACTIVA, ERROR_SECUENCIA_AGOTADA_ACCION,
+    ERROR_SECUENCIA_VENCIDA, ERROR_NO_SECUENCIA_DISPONIBLE,
+    ERROR_MES_ANIO_REQUERIDOS, ERROR_MES_ANIO_NUMEROS
+)
 
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PAGINACIÓN
+# =============================================================================
+
+class TipoComprobantePagination(PageNumberPagination):
+    """Paginación para TipoComprobante"""
+    page_size = PAGE_SIZE_REPORTES
+    page_size_query_param = 'page_size'
+    max_page_size = PAGE_SIZE_MAX
+
+
+class SecuenciaNCFPagination(PageNumberPagination):
+    """Paginación para SecuenciaNCF"""
+    page_size = PAGE_SIZE_REPORTES
+    page_size_query_param = 'page_size'
+    max_page_size = PAGE_SIZE_MAX
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def get_tipo_identificacion(numero):
+    """
+    Determina el tipo de identificación según el formato.
+
+    Args:
+        numero: Número de identificación
+
+    Returns:
+        str: '1' para RNC, '2' para Cédula, '3' para Otro
+    """
+    if not numero:
+        return TIPO_IDENTIFICACION_OTRO
+    numero = numero.replace('-', '').replace(' ', '')
+    if len(numero) == LONGITUD_RNC:
+        return TIPO_IDENTIFICACION_RNC
+    elif len(numero) == LONGITUD_CEDULA:
+        return TIPO_IDENTIFICACION_CEDULA
+    return TIPO_IDENTIFICACION_OTRO
+
+
+# =============================================================================
+# VIEWSETS
+# =============================================================================
 
 class TipoComprobanteViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de comprobantes fiscales.
+
+    Endpoints:
+        GET/POST /api/v1/dgii/tipos-comprobante/
+        GET/PUT/PATCH/DELETE /api/v1/dgii/tipos-comprobante/{id}/
+
+    Permisos:
+        - IsAuthenticated para lectura
+        - CanGestionarTipoComprobante para crear/editar/eliminar
     """
-    queryset = TipoComprobante.objects.all()
+    queryset = TipoComprobante.objects.select_related(
+        'empresa', 'usuario_creacion', 'usuario_modificacion'
+    ).all()
     serializer_class = TipoComprobanteSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = TipoComprobantePagination
     filterset_fields = ['activo', 'codigo', 'prefijo']
     search_fields = ['codigo', 'nombre']
-    ordering_fields = ['codigo', 'nombre']
+    ordering_fields = ['codigo', 'nombre', 'fecha_creacion']
     ordering = ['codigo']
 
-    def perform_create(self, serializer):
-        serializer.save(empresa=self.request.user.empresa)
+    def get_permissions(self):
+        """Aplica permisos según la acción"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAuthenticated(), CanGestionarTipoComprobante()]
+        return [IsAuthenticated()]
 
-
-class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
-    """
-    ViewSet para gestionar secuencias de NCF.
-    """
-    queryset = SecuenciaNCF.objects.select_related('tipo_comprobante').all()
-    serializer_class = SecuenciaNCFSerializer
-    permission_classes = [IsAuthenticated]
-    filterset_fields = ['tipo_comprobante', 'activo']
-    search_fields = ['descripcion']
-    ordering_fields = ['fecha_vencimiento', 'secuencia_actual']
-    ordering = ['-fecha_creacion']
+    def get_serializer_class(self):
+        """Usa serializer optimizado para listados"""
+        if self.action == 'list':
+            return TipoComprobanteListSerializer
+        return TipoComprobanteSerializer
 
     def perform_create(self, serializer):
+        """Asigna empresa y usuario al crear"""
+        logger.info(
+            f"Creando TipoComprobante por usuario {self.request.user.id}"
+        )
         serializer.save(
             empresa=self.request.user.empresa,
             usuario_creacion=self.request.user
         )
 
     def perform_update(self, serializer):
+        """Asigna usuario de modificación"""
+        logger.info(
+            f"Actualizando TipoComprobante {serializer.instance.id} "
+            f"por usuario {self.request.user.id}"
+        )
+        serializer.save(usuario_modificacion=self.request.user)
+
+
+class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar secuencias de NCF.
+
+    Endpoints:
+        GET/POST /api/v1/dgii/secuencias/
+        GET/PUT/PATCH/DELETE /api/v1/dgii/secuencias/{id}/
+        GET /api/v1/dgii/secuencias/activas/
+        GET /api/v1/dgii/secuencias/por_vencer/
+        POST /api/v1/dgii/secuencias/{id}/generar_ncf/
+        POST /api/v1/dgii/secuencias/generar_por_tipo/
+
+    Permisos:
+        - IsAuthenticated para lectura
+        - CanGestionarSecuencia para crear/editar/eliminar
+        - CanGenerarNCF para generar_ncf y generar_por_tipo
+    """
+    queryset = SecuenciaNCF.objects.select_related(
+        'tipo_comprobante', 'tipo_comprobante__empresa',
+        'empresa', 'usuario_creacion', 'usuario_modificacion'
+    ).all()
+    serializer_class = SecuenciaNCFSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = SecuenciaNCFPagination
+    filterset_fields = ['tipo_comprobante', 'activo']
+    search_fields = ['descripcion', 'tipo_comprobante__nombre']
+    ordering_fields = ['fecha_vencimiento', 'secuencia_actual', 'fecha_creacion']
+    ordering = ['-fecha_creacion']
+
+    def get_permissions(self):
+        """Aplica permisos según la acción"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAuthenticated(), CanGestionarSecuencia()]
+        if self.action in ['generar_ncf', 'generar_por_tipo']:
+            return [IsAuthenticated(), CanGenerarNCF()]
+        return [IsAuthenticated()]
+
+    def get_serializer_class(self):
+        """Usa serializer optimizado para listados"""
+        if self.action == 'list':
+            return SecuenciaNCFListSerializer
+        return SecuenciaNCFSerializer
+
+    def perform_create(self, serializer):
+        """Asigna empresa y usuario al crear"""
+        logger.info(
+            f"Creando SecuenciaNCF por usuario {self.request.user.id}"
+        )
+        serializer.save(
+            empresa=self.request.user.empresa,
+            usuario_creacion=self.request.user
+        )
+
+    def perform_update(self, serializer):
+        """Asigna usuario de modificación"""
+        logger.info(
+            f"Actualizando SecuenciaNCF {serializer.instance.id} "
+            f"por usuario {self.request.user.id}"
+        )
         serializer.save(usuario_modificacion=self.request.user)
 
     @action(detail=False, methods=['get'])
     def activas(self, request):
-        """Retorna solo las secuencias activas y no agotadas"""
+        """
+        Retorna solo las secuencias activas y no agotadas.
+
+        Endpoint: GET /api/v1/dgii/secuencias/activas/
+        """
         secuencias = self.get_queryset().filter(
             activo=True,
             fecha_vencimiento__gte=date.today()
@@ -73,17 +219,19 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def por_vencer(self, request):
-        """Retorna secuencias proximas a vencer o con pocos NCF disponibles"""
+        """
+        Retorna secuencias próximas a vencer o con pocos NCF disponibles.
+
+        Endpoint: GET /api/v1/dgii/secuencias/por_vencer/
+        """
         from datetime import timedelta
         fecha_alerta = date.today() + timedelta(days=30)
 
-        secuencias = self.get_queryset().filter(
-            activo=True
-        )
+        secuencias = self.get_queryset().filter(activo=True)
 
         alertas = []
         for secuencia in secuencias:
-            disponibles = secuencia.secuencia_final - secuencia.secuencia_actual
+            disponibles = secuencia.disponibles
             if secuencia.fecha_vencimiento <= fecha_alerta or disponibles <= secuencia.alerta_cantidad:
                 alertas.append({
                     'secuencia': SecuenciaNCFSerializer(secuencia).data,
@@ -93,31 +241,53 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
                     'ncf_disponibles': disponibles
                 })
 
+        logger.info(
+            f"Consulta de secuencias por vencer: {len(alertas)} alertas "
+            f"(empresa_id={request.user.empresa_id})"
+        )
         return Response(alertas)
 
     @action(detail=True, methods=['post'])
     def generar_ncf(self, request, pk=None):
         """
         Genera el siguiente NCF de una secuencia.
-        Debe usarse dentro de una transaccion.
+
+        IDEMPOTENTE: Cada llamada genera un nuevo NCF (esto es intencional).
+
+        Endpoint: POST /api/v1/dgii/secuencias/{id}/generar_ncf/
+
+        Returns:
+            NCF generado, secuencia actual y disponibles.
         """
         secuencia = self.get_object()
 
         if not secuencia.activo:
+            logger.warning(
+                f"Intento de generar NCF en secuencia inactiva {pk} "
+                f"por usuario {request.user.id}"
+            )
             return Response(
-                {'error': 'Esta secuencia no esta activa.'},
+                {'error': ERROR_SECUENCIA_NO_ACTIVA},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if secuencia.agotada:
+            logger.warning(
+                f"Intento de generar NCF en secuencia agotada {pk} "
+                f"por usuario {request.user.id}"
+            )
             return Response(
-                {'error': 'Esta secuencia esta agotada.'},
+                {'error': ERROR_SECUENCIA_AGOTADA_ACCION},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if secuencia.fecha_vencimiento < date.today():
+            logger.warning(
+                f"Intento de generar NCF en secuencia vencida {pk} "
+                f"por usuario {request.user.id}"
+            )
             return Response(
-                {'error': 'Esta secuencia ha vencido.'},
+                {'error': ERROR_SECUENCIA_VENCIDA},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -126,19 +296,32 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
             secuencia = SecuenciaNCF.objects.select_for_update().get(pk=secuencia.pk)
             ncf = secuencia.siguiente_numero()
             secuencia.secuencia_actual += 1
-            secuencia.save()
+            secuencia.usuario_modificacion = request.user
+            secuencia.save(update_fields=['secuencia_actual', 'usuario_modificacion', 'fecha_actualizacion'])
+
+        logger.info(
+            f"NCF generado: {ncf} (secuencia={pk}, usuario={request.user.id})"
+        )
 
         return Response({
             'ncf': ncf,
             'secuencia_actual': secuencia.secuencia_actual,
-            'disponibles': secuencia.secuencia_final - secuencia.secuencia_actual
+            'disponibles': secuencia.disponibles
         })
 
     @action(detail=False, methods=['post'])
     def generar_por_tipo(self, request):
         """
         Genera NCF dado un tipo de comprobante.
-        Busca automaticamente la secuencia activa correspondiente.
+        Busca automáticamente la secuencia activa correspondiente.
+
+        Endpoint: POST /api/v1/dgii/secuencias/generar_por_tipo/
+
+        Request Body:
+            tipo_comprobante_id: ID del tipo de comprobante
+
+        Returns:
+            NCF generado, tipo de comprobante, secuencia_id y disponibles.
         """
         serializer = GenerarNCFSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -154,20 +337,30 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
             ).first()
 
             if not secuencia or secuencia.agotada:
+                logger.warning(
+                    f"No hay secuencia disponible para tipo {tipo_id} "
+                    f"(empresa_id={request.user.empresa_id})"
+                )
                 return Response(
-                    {'error': 'No hay secuencia disponible para este tipo de comprobante.'},
+                    {'error': ERROR_NO_SECUENCIA_DISPONIBLE},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             ncf = secuencia.siguiente_numero()
             secuencia.secuencia_actual += 1
-            secuencia.save()
+            secuencia.usuario_modificacion = request.user
+            secuencia.save(update_fields=['secuencia_actual', 'usuario_modificacion', 'fecha_actualizacion'])
+
+        logger.info(
+            f"NCF generado por tipo: {ncf} (tipo={tipo_id}, secuencia={secuencia.id}, "
+            f"usuario={request.user.id})"
+        )
 
         return Response({
             'ncf': ncf,
             'tipo_comprobante': str(secuencia.tipo_comprobante),
             'secuencia_id': secuencia.id,
-            'disponibles': secuencia.secuencia_final - secuencia.secuencia_actual
+            'disponibles': secuencia.disponibles
         })
 
 
@@ -181,10 +374,23 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
     Django 6.0: Paginación agregada para formato JSON.
     - Use ?page=N y ?page_size=N para paginar resultados JSON
     - El formato TXT siempre exporta todos los registros (requerido por DGII)
+
+    Permisos:
+        - CanGenerarReporte606 para formato_606 y formato_606_async
+        - CanGenerarReporte607 para formato_607 y formato_607_async
+        - CanGenerarReporte608 para formato_608 y formato_608_async
     """
     permission_classes = [IsAuthenticated]
-    DEFAULT_PAGE_SIZE = 100
-    MAX_PAGE_SIZE = 500
+
+    def get_permissions(self):
+        """Aplica permisos según la acción"""
+        if self.action in ['formato_606', 'formato_606_async']:
+            return [IsAuthenticated(), CanGenerarReporte606()]
+        if self.action in ['formato_607', 'formato_607_async']:
+            return [IsAuthenticated(), CanGenerarReporte607()]
+        if self.action in ['formato_608', 'formato_608_async']:
+            return [IsAuthenticated(), CanGenerarReporte608()]
+        return [IsAuthenticated()]
 
     def _paginate_registros(self, request, registros):
         """
@@ -194,12 +400,12 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             dict con 'results', 'count', 'page', 'page_size', 'total_pages'
         """
         page = request.query_params.get('page')
-        page_size = request.query_params.get('page_size', self.DEFAULT_PAGE_SIZE)
+        page_size = request.query_params.get('page_size', PAGE_SIZE_DEFAULT)
 
         try:
-            page_size = min(int(page_size), self.MAX_PAGE_SIZE)
+            page_size = min(int(page_size), PAGE_SIZE_MAX)
         except (ValueError, TypeError):
-            page_size = self.DEFAULT_PAGE_SIZE
+            page_size = PAGE_SIZE_DEFAULT
 
         total_count = len(registros)
         total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
@@ -253,7 +459,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -262,9 +468,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Iniciando generación async reporte 606 {anio}-{mes:02d} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         # Encolar tarea en segundo plano
         task_result = generar_reporte_606.enqueue(
@@ -299,7 +510,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -308,9 +519,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Iniciando generación async reporte 607 {anio}-{mes:02d} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         task_result = generar_reporte_607.enqueue(
             empresa_id=empresa.id,
@@ -344,7 +560,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -353,9 +569,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Iniciando generación async reporte 608 {anio}-{mes:02d} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         task_result = generar_reporte_608.enqueue(
             empresa_id=empresa.id,
@@ -370,17 +591,6 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
         })
 
     # ==================== ENDPOINTS SÍNCRONOS (compatibilidad) ====================
-
-    def _get_tipo_identificacion(self, numero):
-        """Determina el tipo de identificación según el formato"""
-        if not numero:
-            return '3'  # Sin identificación
-        numero = numero.replace('-', '').replace(' ', '')
-        if len(numero) == 9:
-            return '1'  # RNC
-        elif len(numero) == 11:
-            return '2'  # Cédula
-        return '3'  # Otro
 
     @action(detail=False, methods=['get'])
     def formato_606(self, request):
@@ -401,7 +611,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -410,9 +620,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Generando reporte 606 {anio}-{mes:02d} formato={formato} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         # Filtrar compras del período
         compras = Compra.objects.filter(
@@ -429,15 +644,15 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
             registro = {
                 'rnc_cedula': rnc,
-                'tipo_identificacion': self._get_tipo_identificacion(rnc),
+                'tipo_identificacion': get_tipo_identificacion(rnc),
                 'tipo_bienes_servicios': compra.tipo_gasto,
                 'ncf': compra.numero_ncf or '',
                 'ncf_modificado': compra.ncf_modificado or '',
                 'fecha_comprobante': compra.fecha_compra.strftime('%Y%m%d'),
-                'fecha_pago': compra.fecha_compra.strftime('%Y%m%d'),  # TODO: Usar fecha real de pago
+                'fecha_pago': compra.fecha_compra.strftime('%Y%m%d'),
                 'monto_facturado': str(compra.total),
                 'itbis_facturado': str(compra.impuestos),
-                'itbis_retenido': '0',  # TODO: Implementar retenciones
+                'itbis_retenido': '0',
                 'itbis_sujeto_proporcionalidad': '0',
                 'itbis_llevado_costo': '0',
                 'itbis_por_adelantar': '0',
@@ -448,7 +663,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
                 'impuesto_selectivo_consumo': '0',
                 'otros_impuestos_tasas': '0',
                 'monto_propina_legal': '0',
-                'forma_pago': '01',  # TODO: Mapear forma de pago real
+                'forma_pago': '01',
             }
             registros.append(registro)
 
@@ -523,7 +738,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -532,9 +747,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Generando reporte 607 {anio}-{mes:02d} formato={formato} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         # Filtrar facturas del período (solo con NCF)
         facturas = Factura.objects.filter(
@@ -555,9 +775,9 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
             registro = {
                 'rnc_cedula': rnc,
-                'tipo_identificacion': self._get_tipo_identificacion(rnc),
+                'tipo_identificacion': get_tipo_identificacion(rnc),
                 'ncf': factura.ncf or '',
-                'ncf_modificado': '',  # TODO: Obtener de notas de crédito/débito
+                'ncf_modificado': '',
                 'tipo_ingreso': tipo_ingreso,
                 'fecha_comprobante': factura.fecha.strftime('%Y%m%d'),
                 'fecha_retencion': '',
@@ -653,7 +873,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
 
         if not mes or not anio:
             return Response(
-                {'error': 'Debe especificar mes y anio'},
+                {'error': ERROR_MES_ANIO_REQUERIDOS},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -662,9 +882,14 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
             anio = int(anio)
         except ValueError:
             return Response(
-                {'error': 'mes y anio deben ser números'},
+                {'error': ERROR_MES_ANIO_NUMEROS},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        logger.info(
+            f"Generando reporte 608 {anio}-{mes:02d} formato={formato} "
+            f"(empresa_id={empresa.id}, usuario={request.user.id})"
+        )
 
         # Facturas canceladas con NCF
         facturas_anuladas = Factura.objects.filter(
@@ -679,7 +904,7 @@ class ReportesDGIIViewSet(viewsets.ViewSet):
         for factura in facturas_anuladas:
             registro = {
                 'ncf': factura.ncf,
-                'tipo_anulacion': '02',  # 01=Deterioro, 02=Error de impresión, 03=Impresión defectuosa, 04=Duplicidad, 05=Corrección información, 06=Cambio de productos, 07=Devolución productos, 08=Omisión de productos, 09=Errores en secuencia NCF
+                'tipo_anulacion': '02',
                 'fecha_comprobante': factura.fecha.strftime('%Y%m%d'),
             }
             registros.append(registro)

@@ -480,9 +480,24 @@ class EmpresaAPITest(APITestCase):
         response = self.client.get('/api/v1/empresas/?ordering=-fecha_creacion')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_usuario_sin_permisos_recibe_403(self):
-        """Test: Usuario sin permisos recibe 403 Forbidden"""
-        # Usuario sin permiso view_empresa
+    def test_usuario_autenticado_puede_listar(self):
+        """Test: Usuario autenticado puede listar (ve solo su empresa)"""
+        # Usuario normal puede listar empresas (solo ve la suya)
+        user_normal = User.objects.create_user(
+            username='normal',
+            password='test123',
+            empresa=self.empresa,
+            rol='facturador'
+        )
+        self.client.force_authenticate(user=user_normal)
+        response = self.client.get('/api/v1/empresas/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Solo ve su propia empresa
+        self.assertEqual(len(response.data['results']), 1)
+
+    def test_usuario_sin_permisos_no_puede_crear(self):
+        """Test: Usuario sin permisos no puede crear empresa"""
+        # Usuario sin permiso gestionar_empresa
         user_sin_permisos = User.objects.create_user(
             username='sin_permisos',
             password='test123',
@@ -490,5 +505,8 @@ class EmpresaAPITest(APITestCase):
             rol='facturador'
         )
         self.client.force_authenticate(user=user_sin_permisos)
-        response = self.client.get('/api/v1/empresas/')
+        response = self.client.post('/api/v1/empresas/', {
+            'nombre': 'Nueva Empresa',
+            'rnc': '987654321'
+        })
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

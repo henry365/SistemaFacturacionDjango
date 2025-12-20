@@ -458,7 +458,7 @@ class ServicioKardexTest(TestCase):
             producto=self.producto,
             almacen=self.almacen,
             tipo_movimiento='SALIDA_VENTA',
-            cantidad=Decimal('-30'),
+            cantidad=Decimal('30'),
             costo_unitario=Decimal('50.00'),
             referencia='VENTA-001',
             usuario=self.user,

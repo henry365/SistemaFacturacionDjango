@@ -576,3 +576,190 @@ class PermissionAPITest(APITestCase):
         response = self.client.post('/api/v1/permisos/', data)
         # ReadOnlyModelViewSet no permite POST
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class UserServiceIdempotencyTest(TestCase):
+    """
+    Tests de idempotencia para UserService.
+
+    Verifican que las operaciones pueden ejecutarse múltiples veces
+    sin efectos secundarios diferentes (IDEMPOTENCIA según Guía Inicial).
+    """
+
+    def setUp(self):
+        """Configuración inicial"""
+        self.empresa = Empresa.objects.create(
+            nombre='Empresa Test',
+            rnc='123456789'
+        )
+
+        self.admin = User.objects.create_user(
+            username='admin',
+            password='admin123',
+            rol='admin',
+            empresa=self.empresa
+        )
+
+        self.user = User.objects.create_user(
+            username='usuario',
+            password='user123',
+            empresa=self.empresa
+        )
+
+        self.grupo = Group.objects.create(name='test_group')
+
+    def test_activar_usuario_idempotente(self):
+        """Test: Activar usuario múltiples veces es idempotente"""
+        from .services import UserService
+
+        # Desactivar primero
+        self.user.is_active = False
+        self.user.save()
+
+        # Primera activación
+        exito1, error1 = UserService.activar_usuario(self.user, self.admin)
+        self.assertTrue(exito1)
+        self.assertIsNone(error1)
+
+        # Segunda activación (debe fallar graciosamente)
+        exito2, error2 = UserService.activar_usuario(self.user, self.admin)
+        self.assertFalse(exito2)
+        self.assertEqual(error2, 'El usuario ya está activo')
+
+        # El usuario sigue activo
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_active)
+
+    def test_desactivar_usuario_idempotente(self):
+        """Test: Desactivar usuario múltiples veces es idempotente"""
+        from .services import UserService
+
+        # Primera desactivación
+        exito1, error1 = UserService.desactivar_usuario(self.user, self.admin)
+        self.assertTrue(exito1)
+        self.assertIsNone(error1)
+
+        # Segunda desactivación (debe fallar graciosamente)
+        exito2, error2 = UserService.desactivar_usuario(self.user, self.admin)
+        self.assertFalse(exito2)
+        self.assertEqual(error2, 'El usuario ya está inactivo')
+
+        # El usuario sigue inactivo
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_active)
+
+    def test_asignar_permisos_idempotente(self):
+        """Test: Asignar permisos múltiples veces es idempotente"""
+        from .services import UserService
+
+        permisos = list(Permission.objects.all()[:3])
+        permisos_ids = [p.id for p in permisos]
+
+        # Primera asignación
+        cantidad1, error1 = UserService.asignar_permisos(
+            self.user, permisos_ids, self.admin
+        )
+        self.assertEqual(cantidad1, 3)
+        self.assertIsNone(error1)
+
+        # Segunda asignación (debe retornar 0, ya tiene los permisos)
+        cantidad2, error2 = UserService.asignar_permisos(
+            self.user, permisos_ids, self.admin
+        )
+        self.assertEqual(cantidad2, 0)
+        self.assertIsNone(error2)
+
+        # El usuario sigue teniendo exactamente 3 permisos
+        self.assertEqual(self.user.user_permissions.count(), 3)
+
+    def test_quitar_permisos_idempotente(self):
+        """Test: Quitar permisos múltiples veces es idempotente"""
+        from .services import UserService
+
+        permisos = list(Permission.objects.all()[:3])
+        permisos_ids = [p.id for p in permisos]
+
+        # Asignar permisos primero
+        self.user.user_permissions.add(*permisos)
+
+        # Primera eliminación
+        cantidad1, error1 = UserService.quitar_permisos(
+            self.user, permisos_ids, self.admin
+        )
+        self.assertEqual(cantidad1, 3)
+        self.assertIsNone(error1)
+
+        # Segunda eliminación (debe retornar 0, ya no tiene los permisos)
+        cantidad2, error2 = UserService.quitar_permisos(
+            self.user, permisos_ids, self.admin
+        )
+        self.assertEqual(cantidad2, 0)
+        self.assertIsNone(error2)
+
+        # El usuario no tiene permisos
+        self.assertEqual(self.user.user_permissions.count(), 0)
+
+    def test_asignar_grupo_idempotente(self):
+        """Test: Asignar grupo múltiples veces es idempotente"""
+        from .services import UserService
+
+        # Primera asignación
+        exito1, error1 = UserService.asignar_grupo(
+            self.user, grupo_id=self.grupo.id, ejecutado_por=self.admin
+        )
+        self.assertTrue(exito1)
+        self.assertIsNone(error1)
+
+        # Segunda asignación (debe ser exitoso, ya pertenece)
+        exito2, error2 = UserService.asignar_grupo(
+            self.user, grupo_id=self.grupo.id, ejecutado_por=self.admin
+        )
+        self.assertTrue(exito2)  # Éxito porque ya pertenece (idempotente)
+        self.assertIsNone(error2)
+
+        # El usuario pertenece al grupo solo una vez
+        self.assertEqual(self.user.groups.filter(id=self.grupo.id).count(), 1)
+
+    def test_quitar_grupo_idempotente(self):
+        """Test: Quitar grupo múltiples veces es idempotente"""
+        from .services import UserService
+
+        # Asignar grupo primero
+        self.user.groups.add(self.grupo)
+
+        # Primera eliminación
+        exito1, error1 = UserService.quitar_grupo(
+            self.user, grupo_id=self.grupo.id, ejecutado_por=self.admin
+        )
+        self.assertTrue(exito1)
+        self.assertIsNone(error1)
+
+        # Segunda eliminación (debe ser exitoso, ya no pertenece)
+        exito2, error2 = UserService.quitar_grupo(
+            self.user, grupo_id=self.grupo.id, ejecutado_por=self.admin
+        )
+        self.assertTrue(exito2)  # Éxito porque ya no pertenece (idempotente)
+        self.assertIsNone(error2)
+
+        # El usuario no pertenece al grupo
+        self.assertFalse(self.user.groups.filter(id=self.grupo.id).exists())
+
+    def test_asignar_permisos_parcialmente_nuevos(self):
+        """Test: Asignar permisos donde algunos ya existen"""
+        from .services import UserService
+
+        permisos = list(Permission.objects.all()[:4])
+        permisos_ids = [p.id for p in permisos]
+
+        # Asignar los primeros 2
+        self.user.user_permissions.add(*permisos[:2])
+
+        # Asignar todos (solo debe agregar los 2 nuevos)
+        cantidad, error = UserService.asignar_permisos(
+            self.user, permisos_ids, self.admin
+        )
+        self.assertEqual(cantidad, 2)  # Solo 2 nuevos
+        self.assertIsNone(error)
+
+        # El usuario tiene los 4 permisos
+        self.assertEqual(self.user.user_permissions.count(), 4)

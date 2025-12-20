@@ -3,8 +3,11 @@ Modelos para ajustes de inventario y conteos físicos.
 """
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from productos.models import Producto
 import uuid
+
+from ..constants import ERROR_ALMACEN_NO_PERTENECE_EMPRESA
 
 
 class AjusteInventario(models.Model):
@@ -81,6 +84,35 @@ class AjusteInventario(models.Model):
         verbose_name = 'Ajuste de Inventario'
         verbose_name_plural = 'Ajustes de Inventario'
         ordering = ['-fecha_ajuste']
+        indexes = [
+            models.Index(fields=['empresa', 'estado']),
+            models.Index(fields=['empresa', '-fecha_ajuste']),
+        ]
+        permissions = [
+            ('gestionar_ajusteinventario', 'Puede gestionar ajustes'),
+            ('aprobar_ajusteinventario', 'Puede aprobar ajustes'),
+        ]
+
+    def clean(self):
+        """Validaciones de negocio para AjusteInventario."""
+        errors = {}
+
+        if self.empresa and self.almacen:
+            if self.almacen.empresa and self.almacen.empresa != self.empresa:
+                errors['almacen'] = ERROR_ALMACEN_NO_PERTENECE_EMPRESA
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Guarda con validaciones."""
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = ['empresa', 'almacen', 'estado']
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Ajuste {self.id} - {self.tipo_ajuste} - {self.estado}"
@@ -176,6 +208,34 @@ class ConteoFisico(models.Model):
         verbose_name_plural = 'Conteos Físicos'
         ordering = ['-fecha_conteo']
         unique_together = ('empresa', 'numero_conteo')
+        indexes = [
+            models.Index(fields=['empresa', 'estado']),
+            models.Index(fields=['empresa', '-fecha_conteo']),
+        ]
+        permissions = [
+            ('gestionar_conteofisico', 'Puede gestionar conteos físicos'),
+        ]
+
+    def clean(self):
+        """Validaciones de negocio para ConteoFisico."""
+        errors = {}
+
+        if self.empresa and self.almacen:
+            if self.almacen.empresa and self.almacen.empresa != self.empresa:
+                errors['almacen'] = ERROR_ALMACEN_NO_PERTENECE_EMPRESA
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Guarda con validaciones."""
+        update_fields = kwargs.get('update_fields')
+        campos_criticos = ['empresa', 'almacen', 'estado']
+
+        if update_fields is None or any(f in update_fields for f in campos_criticos):
+            self.full_clean()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Conteo {self.numero_conteo} - {self.almacen} - {self.estado}"

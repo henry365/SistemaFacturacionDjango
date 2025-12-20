@@ -138,6 +138,21 @@ class Compra(models.Model):
         if self.tasa_cambio <= 0:
             raise ValidationError({'tasa_cambio': 'La tasa de cambio debe ser mayor a cero.'})
 
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'proveedor', 'orden_compra', 'estado', 'total', 'monto_pagado']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+        super().save(*args, **kwargs)
+
     @property
     def estado_display(self):
         return self.get_estado_display()
@@ -195,7 +210,18 @@ class DetalleCompra(models.Model):
                 self.tipo_linea = 'GASTO'
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['compra', 'producto', 'cantidad', 'costo_unitario', 'impuesto', 'descuento', 'tipo_linea']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
         super().save(*args, **kwargs)
 
     @property
@@ -300,6 +326,21 @@ class Gasto(models.Model):
 
         if self.tasa_cambio <= 0:
             raise ValidationError({'tasa_cambio': 'La tasa de cambio debe ser mayor a cero.'})
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'proveedor', 'estado', 'total']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def estado_display(self):

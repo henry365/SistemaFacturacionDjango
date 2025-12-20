@@ -224,6 +224,19 @@ class VendedorAPITest(APITestCase):
             perm = Permission.objects.get(codename=codename, content_type=content_type)
             self.user.user_permissions.add(perm)
 
+        # Asignar permiso personalizado de gestionar_vendedor
+        try:
+            perm_gestionar = Permission.objects.get(
+                codename='gestionar_vendedor',
+                content_type=content_type
+            )
+            self.user.user_permissions.add(perm_gestionar)
+        except Permission.DoesNotExist:
+            pass
+
+        # Refrescar usuario para limpiar cache de permisos
+        self.user = User.objects.get(pk=self.user.pk)
+
         self.vendedor = Vendedor.objects.create(
             empresa=self.empresa,
             nombre='Vendedor Test',

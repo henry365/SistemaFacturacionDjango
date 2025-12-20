@@ -84,6 +84,19 @@ class RecepcionCompra(models.Model):
             raise ValidationError({'orden_compra': 'La orden de compra debe estar aprobada o enviada para poder recibir mercancía.'})
 
     def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'orden_compra', 'almacen', 'estado']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
         if not self.numero_recepcion:
             from django.db.models import Max
             ultimo = RecepcionCompra.objects.filter(empresa=self.empresa).aggregate(Max('id'))['id__max'] or 0
@@ -136,6 +149,16 @@ class DetalleRecepcion(models.Model):
 
         if (self.cantidad_recibida + self.cantidad_rechazada) > self.cantidad_ordenada:
             raise ValidationError('La suma de cantidad recibida y rechazada no puede exceder la cantidad ordenada.')
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.recepcion.numero_recepcion} - {self.producto.nombre} ({self.cantidad_recibida}/{self.cantidad_ordenada})"
@@ -234,6 +257,20 @@ class DevolucionProveedor(models.Model):
             raise ValidationError({'total': 'El total no puede ser negativo.'})
 
     def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            # Excluir campos calculados de validación para evitar problemas con decimales
+            campos_criticos = ['empresa', 'proveedor', 'compra', 'estado']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
         if not self.numero_devolucion:
             from django.db.models import Max
             ultimo = DevolucionProveedor.objects.filter(empresa=self.empresa).aggregate(Max('id'))['id__max'] or 0
@@ -241,9 +278,13 @@ class DevolucionProveedor(models.Model):
         super().save(*args, **kwargs)
 
     def calcular_totales(self):
+        from decimal import Decimal, ROUND_HALF_UP
         detalles = self.detalles.all()
-        self.subtotal = sum(d.cantidad * d.costo_unitario for d in detalles)
-        self.impuestos = sum(d.impuesto for d in detalles)
+        subtotal = sum(d.cantidad * d.costo_unitario for d in detalles)
+        impuestos = sum(d.impuesto for d in detalles)
+        # Redondear a 2 decimales para cumplir con el modelo
+        self.subtotal = Decimal(subtotal).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.impuestos = Decimal(impuestos).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         self.total = self.subtotal + self.impuestos
         self.save(update_fields=['subtotal', 'impuestos', 'total'])
 
@@ -295,6 +336,16 @@ class DetalleDevolucionProveedor(models.Model):
 
         if self.almacen and self.devolucion.empresa and self.almacen.empresa != self.devolucion.empresa:
             raise ValidationError({'almacen': 'El almacén debe pertenecer a la misma empresa.'})
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def subtotal(self):

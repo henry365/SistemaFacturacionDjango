@@ -103,6 +103,19 @@ class LiquidacionImportacion(models.Model):
             raise ValidationError({'tasa_cambio': 'La tasa de cambio debe ser mayor a cero.'})
 
     def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'compra', 'estado', 'total_fob', 'total_cif']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
         if not self.numero_liquidacion:
             from django.db.models import Max
             ultimo = LiquidacionImportacion.objects.filter(empresa=self.empresa).aggregate(Max('id'))['id__max'] or 0
@@ -166,6 +179,16 @@ class GastoImportacion(models.Model):
         if self.monto < 0:
             raise ValidationError({'monto': 'El monto no puede ser negativo.'})
 
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        super().save(*args, **kwargs)
+
     @property
     def tipo_display(self):
         return self.get_tipo_display()
@@ -220,6 +243,21 @@ class TipoRetencion(models.Model):
     def clean(self):
         if self.porcentaje is not None and (self.porcentaje < 0 or self.porcentaje > 100):
             raise ValidationError({'porcentaje': 'El porcentaje debe estar entre 0 y 100.'})
+
+    def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'porcentaje', 'activo']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.codigo} - {self.nombre} ({self.porcentaje}%)"
@@ -296,6 +334,19 @@ class RetencionCompra(models.Model):
             raise ValidationError({'monto_retenido': 'El monto retenido no puede ser negativo.'})
 
     def save(self, *args, **kwargs):
+        """
+        Guarda con validaciones completas.
+
+        CRITICO: Siempre validar antes de guardar para garantizar integridad.
+        """
+        if 'update_fields' not in kwargs:
+            self.full_clean()
+        else:
+            update_fields = kwargs.get('update_fields', [])
+            campos_criticos = ['empresa', 'compra', 'tipo_retencion', 'monto_retenido']
+            if any(campo in update_fields for campo in campos_criticos):
+                self.full_clean()
+
         from decimal import Decimal as Dec
         if self.monto_retenido is None or self.monto_retenido == 0:
             self.monto_retenido = (self.base_imponible * self.porcentaje) / Dec('100')
