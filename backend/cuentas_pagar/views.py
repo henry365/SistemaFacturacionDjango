@@ -19,6 +19,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.core.exceptions import ValidationError
 
 from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
+from usuarios.permissions import ActionBasedPermission
 from .models import CuentaPorPagar, PagoProveedor, DetallePagoProveedor
 from .serializers import (
     CuentaPorPagarSerializer,
@@ -78,7 +79,7 @@ class CuentaPorPagarViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMi
         'usuario_creacion', 'usuario_modificacion'
     ).prefetch_related('pagos_aplicados')
     serializer_class = CuentaPorPagarSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = CuentasPorPagarPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['estado', 'proveedor']
@@ -180,7 +181,7 @@ class PagoProveedorViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMix
         'detalles__cuenta_por_pagar'
     )
     serializer_class = PagoProveedorSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = PagosPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['proveedor', 'metodo_pago']
@@ -253,6 +254,6 @@ class DetallePagoProveedorViewSet(EmpresaFilterMixin, viewsets.ReadOnlyModelView
         'cuenta_por_pagar', 'cuenta_por_pagar__proveedor'
     )
     serializer_class = DetallePagoProveedorSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['pago', 'cuenta_por_pagar', 'empresa']

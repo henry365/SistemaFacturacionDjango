@@ -19,6 +19,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.core.exceptions import ValidationError
 
 from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
+from usuarios.permissions import ActionBasedPermission
 from .models import CuentaPorCobrar, CobroCliente, DetalleCobroCliente
 from .serializers import (
     CuentaPorCobrarSerializer,
@@ -78,7 +79,7 @@ class CuentaPorCobrarViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyM
         'usuario_creacion', 'usuario_modificacion'
     ).prefetch_related('cobros_aplicados')
     serializer_class = CuentaPorCobrarSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = CuentasPorCobrarPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['estado', 'cliente']
@@ -180,7 +181,7 @@ class CobroClienteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixi
         'detalles__cuenta_por_cobrar'
     )
     serializer_class = CobroClienteSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     pagination_class = CobrosPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['cliente', 'metodo_pago']
@@ -253,6 +254,6 @@ class DetalleCobroClienteViewSet(EmpresaFilterMixin, viewsets.ReadOnlyModelViewS
         'cuenta_por_cobrar', 'cuenta_por_cobrar__cliente'
     )
     serializer_class = DetalleCobroClienteSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ActionBasedPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['cobro', 'cuenta_por_cobrar', 'empresa']
