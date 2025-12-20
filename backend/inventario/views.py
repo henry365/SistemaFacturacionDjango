@@ -551,15 +551,52 @@ class AlertaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
 # VIEWSETS DE TRANSFERENCIAS
 # =============================================================================
 
-class DetalleTransferenciaViewSet(viewsets.ModelViewSet):
-    """ViewSet para detalles de transferencias."""
-    queryset = DetalleTransferencia.objects.all()
+class DetalleTransferenciaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para detalles de transferencias.
+
+    Endpoints:
+        GET /detalles-transferencia/ - Listar detalles
+        POST /detalles-transferencia/ - Crear detalle
+        GET /detalles-transferencia/{id}/ - Detalle
+        PUT/PATCH /detalles-transferencia/{id}/ - Actualizar
+        DELETE /detalles-transferencia/{id}/ - Eliminar
+    """
+    queryset = DetalleTransferencia.objects.select_related(
+        'transferencia', 'transferencia__empresa', 'producto', 'lote'
+    ).all()
     serializer_class = DetalleTransferenciaSerializer
     pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['transferencia', 'producto']
+    search_fields = ['producto__nombre', 'producto__codigo_sku']
+    ordering_fields = ['id', 'cantidad']
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
         return [permissions.IsAuthenticated(), CanGestionarTransferencias()]
+
+    def get_queryset(self):
+        """Filtra por empresa de la transferencia."""
+        qs = super().get_queryset()
+        if hasattr(self.request.user, 'empresa') and self.request.user.empresa:
+            qs = qs.filter(transferencia__empresa=self.request.user.empresa)
+        return qs
+
+    def perform_create(self, serializer):
+        """Log al crear detalle."""
+        super().perform_create(serializer)
+        logger.info(f"DetalleTransferencia creado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_update(self, serializer):
+        """Log al actualizar detalle."""
+        super().perform_update(serializer)
+        logger.info(f"DetalleTransferencia actualizado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar detalle."""
+        logger.warning(f"DetalleTransferencia eliminado: id={instance.id} (usuario={self.request.user.id})")
+        instance.delete()
 
 
 class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
@@ -686,15 +723,52 @@ class TransferenciaInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idem
 # VIEWSETS DE AJUSTES
 # =============================================================================
 
-class DetalleAjusteInventarioViewSet(viewsets.ModelViewSet):
-    """ViewSet para detalles de ajustes."""
-    queryset = DetalleAjusteInventario.objects.all()
+class DetalleAjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para detalles de ajustes.
+
+    Endpoints:
+        GET /detalles-ajuste/ - Listar detalles
+        POST /detalles-ajuste/ - Crear detalle
+        GET /detalles-ajuste/{id}/ - Detalle
+        PUT/PATCH /detalles-ajuste/{id}/ - Actualizar
+        DELETE /detalles-ajuste/{id}/ - Eliminar
+    """
+    queryset = DetalleAjusteInventario.objects.select_related(
+        'ajuste', 'ajuste__empresa', 'producto', 'lote'
+    ).all()
     serializer_class = DetalleAjusteInventarioSerializer
     pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['ajuste', 'producto']
+    search_fields = ['producto__nombre', 'producto__codigo_sku']
+    ordering_fields = ['id', 'cantidad']
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
         return [permissions.IsAuthenticated(), CanGestionarAjustes()]
+
+    def get_queryset(self):
+        """Filtra por empresa del ajuste."""
+        qs = super().get_queryset()
+        if hasattr(self.request.user, 'empresa') and self.request.user.empresa:
+            qs = qs.filter(ajuste__empresa=self.request.user.empresa)
+        return qs
+
+    def perform_create(self, serializer):
+        """Log al crear detalle."""
+        super().perform_create(serializer)
+        logger.info(f"DetalleAjusteInventario creado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_update(self, serializer):
+        """Log al actualizar detalle."""
+        super().perform_update(serializer)
+        logger.info(f"DetalleAjusteInventario actualizado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar detalle."""
+        logger.warning(f"DetalleAjusteInventario eliminado: id={instance.id} (usuario={self.request.user.id})")
+        instance.delete()
 
 
 class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
@@ -827,15 +901,52 @@ class AjusteInventarioViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotency
 # VIEWSETS DE CONTEO FÍSICO
 # =============================================================================
 
-class DetalleConteoFisicoViewSet(viewsets.ModelViewSet):
-    """ViewSet para detalles de conteos físicos."""
-    queryset = DetalleConteoFisico.objects.all()
+class DetalleConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para detalles de conteos físicos.
+
+    Endpoints:
+        GET /detalles-conteo/ - Listar detalles
+        POST /detalles-conteo/ - Crear detalle
+        GET /detalles-conteo/{id}/ - Detalle
+        PUT/PATCH /detalles-conteo/{id}/ - Actualizar
+        DELETE /detalles-conteo/{id}/ - Eliminar
+    """
+    queryset = DetalleConteoFisico.objects.select_related(
+        'conteo', 'conteo__empresa', 'producto', 'lote'
+    ).all()
     serializer_class = DetalleConteoFisicoSerializer
     pagination_class = InventarioPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['conteo', 'producto']
+    search_fields = ['producto__nombre', 'producto__codigo_sku']
+    ordering_fields = ['id', 'cantidad_contada']
 
     def get_permissions(self):
         """Aplica permisos según la acción."""
         return [permissions.IsAuthenticated(), CanGestionarConteos()]
+
+    def get_queryset(self):
+        """Filtra por empresa del conteo."""
+        qs = super().get_queryset()
+        if hasattr(self.request.user, 'empresa') and self.request.user.empresa:
+            qs = qs.filter(conteo__empresa=self.request.user.empresa)
+        return qs
+
+    def perform_create(self, serializer):
+        """Log al crear detalle."""
+        super().perform_create(serializer)
+        logger.info(f"DetalleConteoFisico creado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_update(self, serializer):
+        """Log al actualizar detalle."""
+        super().perform_update(serializer)
+        logger.info(f"DetalleConteoFisico actualizado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar detalle."""
+        logger.warning(f"DetalleConteoFisico eliminado: id={instance.id} (usuario={self.request.user.id})")
+        instance.delete()
 
 
 class ConteoFisicoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):

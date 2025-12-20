@@ -87,19 +87,19 @@ class ListaEsperaProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempote
 
     def perform_create(self, serializer):
         """Log al crear lista de espera."""
-        instance = serializer.save()
-        logger.info(f"Lista de espera {instance.id} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Lista de espera {serializer.instance.id} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar lista de espera."""
-        instance = serializer.save()
-        logger.info(f"Lista de espera {instance.id} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Lista de espera {serializer.instance.id} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar lista de espera."""
         lista_id = instance.id
-        instance.delete()
         logger.info(f"Lista de espera {lista_id} eliminada por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -146,19 +146,19 @@ class CotizacionClienteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idempotenc
 
     def perform_create(self, serializer):
         """Log al crear cotización."""
-        instance = serializer.save()
-        logger.info(f"Cotización {instance.id} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Cotización {serializer.instance.id} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar cotización."""
-        instance = serializer.save()
-        logger.info(f"Cotización {instance.id} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Cotización {serializer.instance.id} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar cotización."""
         cotizacion_id = instance.id
-        instance.delete()
         logger.info(f"Cotización {cotizacion_id} eliminada por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -205,19 +205,19 @@ class FacturaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, vi
 
     def perform_create(self, serializer):
         """Log al crear factura."""
-        instance = serializer.save()
-        logger.info(f"Factura {instance.numero_factura} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Factura {serializer.instance.numero_factura} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar factura."""
-        instance = serializer.save()
-        logger.info(f"Factura {instance.numero_factura} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Factura {serializer.instance.numero_factura} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar factura."""
         numero = instance.numero_factura
-        instance.delete()
         logger.info(f"Factura {numero} eliminada por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -264,20 +264,20 @@ class PagoCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
 
     def perform_create(self, serializer):
         """Log al crear pago."""
-        instance = serializer.save()
-        logger.info(f"Pago {instance.id} de {instance.monto} creado por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Pago {serializer.instance.id} de {serializer.instance.monto} creado por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar pago."""
-        instance = serializer.save()
-        logger.info(f"Pago {instance.id} actualizado por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Pago {serializer.instance.id} actualizado por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar pago."""
         pago_id = instance.id
         monto = instance.monto
-        instance.delete()
         logger.info(f"Pago {pago_id} de {monto} eliminado por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -324,19 +324,19 @@ class NotaCreditoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
 
     def perform_create(self, serializer):
         """Log al crear nota de crédito."""
-        instance = serializer.save()
-        logger.info(f"Nota de crédito {instance.id} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Nota de crédito {serializer.instance.id} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar nota de crédito."""
-        instance = serializer.save()
-        logger.info(f"Nota de crédito {instance.id} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Nota de crédito {serializer.instance.id} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar nota de crédito."""
         nota_id = instance.id
-        instance.delete()
         logger.info(f"Nota de crédito {nota_id} eliminada por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -383,19 +383,19 @@ class NotaDebitoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
 
     def perform_create(self, serializer):
         """Log al crear nota de débito."""
-        instance = serializer.save()
-        logger.info(f"Nota de débito {instance.id} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Nota de débito {serializer.instance.id} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar nota de débito."""
-        instance = serializer.save()
-        logger.info(f"Nota de débito {instance.id} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Nota de débito {serializer.instance.id} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar nota de débito."""
         nota_id = instance.id
-        instance.delete()
         logger.info(f"Nota de débito {nota_id} eliminada por {self.request.user}")
+        instance.delete()
 
 
 # =============================================================================
@@ -442,16 +442,16 @@ class DevolucionVentaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyM
 
     def perform_create(self, serializer):
         """Log al crear devolución."""
-        instance = serializer.save()
-        logger.info(f"Devolución {instance.id} creada por {self.request.user}")
+        super().perform_create(serializer)
+        logger.info(f"Devolución {serializer.instance.id} creada por {self.request.user}")
 
     def perform_update(self, serializer):
         """Log al actualizar devolución."""
-        instance = serializer.save()
-        logger.info(f"Devolución {instance.id} actualizada por {self.request.user}")
+        super().perform_update(serializer)
+        logger.info(f"Devolución {serializer.instance.id} actualizada por {self.request.user}")
 
     def perform_destroy(self, instance):
         """Log al eliminar devolución."""
         devolucion_id = instance.id
-        instance.delete()
         logger.info(f"Devolución {devolucion_id} eliminada por {self.request.user}")
+        instance.delete()

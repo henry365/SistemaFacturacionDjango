@@ -347,7 +347,7 @@ class ProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ImagenProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class ImagenProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar imágenes de productos.
 
@@ -477,7 +477,7 @@ class ImagenProductoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.Mode
         return Response({'message': 'Imágenes reordenadas correctamente'})
 
 
-class ReferenciasCruzadasViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class ReferenciasCruzadasViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar referencias cruzadas entre productos.
 

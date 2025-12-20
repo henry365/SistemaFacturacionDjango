@@ -12,6 +12,38 @@ from core.permissions.mixins import ResponsableValidationMixin, AdminStaffMixin
 from rest_framework import permissions
 
 
+class CanGestionarTipoActivo(BaseEmpresaPermission):
+    """
+    Permiso para gestionar tipos de activos (CRUD).
+
+    Permite la operación si el usuario:
+    - Es superusuario o staff, O
+    - Tiene el permiso 'activos.gestionar_tipo_activo'
+    """
+
+    def __init__(self):
+        super().__init__(
+            permission_codename='activos.gestionar_tipo_activo',
+            message='No tiene permiso para gestionar tipos de activos.'
+        )
+
+
+class CanGestionarActivoFijo(BaseEmpresaPermission):
+    """
+    Permiso para gestionar activos fijos (CRUD).
+
+    Permite la operación si el usuario:
+    - Es superusuario o staff, O
+    - Tiene el permiso 'activos.gestionar_activo_fijo'
+    """
+
+    def __init__(self):
+        super().__init__(
+            permission_codename='activos.gestionar_activo_fijo',
+            message='No tiene permiso para gestionar activos fijos.'
+        )
+
+
 class CanDepreciarActivo(BaseEmpresaPermission):
     """
     Permiso para registrar depreciaciones de activos.

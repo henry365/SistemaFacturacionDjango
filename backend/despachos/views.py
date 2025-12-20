@@ -271,8 +271,17 @@ class DespachoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, v
         return Response(stats)
 
 
-class DetalleDespachoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
-    """ViewSet para gestionar Detalles de Despacho"""
+class DetalleDespachoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar Detalles de Despacho.
+
+    Endpoints:
+        GET /api/v1/detalles-despacho/ - Listar detalles
+        POST /api/v1/detalles-despacho/ - Crear detalle
+        GET /api/v1/detalles-despacho/{id}/ - Obtener detalle
+        PUT /api/v1/detalles-despacho/{id}/ - Actualizar detalle
+        DELETE /api/v1/detalles-despacho/{id}/ - Eliminar detalle
+    """
     queryset = DetalleDespacho.objects.all()
     serializer_class = DetalleDespachoSerializer
     permission_classes = [IsAuthenticated, ActionBasedPermission]
@@ -293,3 +302,22 @@ class DetalleDespachoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(despacho__empresa=self.request.user.empresa)
 
         return queryset
+
+    def perform_create(self, serializer):
+        """Log al crear detalle de despacho."""
+        super().perform_create(serializer)
+        instance = serializer.instance
+        logger.info(
+            f"DetalleDespacho creado: producto={instance.producto_id}, "
+            f"cantidad={instance.cantidad_despachada} (usuario={self.request.user.id})"
+        )
+
+    def perform_update(self, serializer):
+        """Log al actualizar detalle de despacho."""
+        super().perform_update(serializer)
+        logger.info(f"DetalleDespacho actualizado: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar detalle de despacho."""
+        logger.warning(f"DetalleDespacho eliminado: id={instance.id} (usuario={self.request.user.id})")
+        instance.delete()

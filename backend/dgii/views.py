@@ -17,7 +17,7 @@ from decimal import Decimal
 import csv
 import io
 
-from core.mixins import EmpresaFilterMixin
+from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
 from .models import TipoComprobante, SecuenciaNCF
 from .serializers import (
     TipoComprobanteSerializer, TipoComprobanteListSerializer,
@@ -86,7 +86,7 @@ def get_tipo_identificacion(numero):
 # VIEWSETS
 # =============================================================================
 
-class TipoComprobanteViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
+class TipoComprobanteViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de comprobantes fiscales.
 
@@ -122,25 +122,31 @@ class TipoComprobanteViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         return TipoComprobanteSerializer
 
     def perform_create(self, serializer):
-        """Asigna empresa y usuario al crear"""
+        """Asigna empresa y usuario al crear con logging"""
+        super().perform_create(serializer)
         logger.info(
-            f"Creando TipoComprobante por usuario {self.request.user.id}"
-        )
-        serializer.save(
-            empresa=self.request.user.empresa,
-            usuario_creacion=self.request.user
+            f"TipoComprobante creado: {serializer.instance.codigo} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
         )
 
     def perform_update(self, serializer):
-        """Asigna usuario de modificación"""
+        """Asigna usuario de modificación con logging"""
+        super().perform_update(serializer)
         logger.info(
-            f"Actualizando TipoComprobante {serializer.instance.id} "
-            f"por usuario {self.request.user.id}"
+            f"TipoComprobante actualizado: {serializer.instance.codigo} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
         )
-        serializer.save(usuario_modificacion=self.request.user)
+
+    def perform_destroy(self, instance):
+        """Elimina tipo de comprobante con logging"""
+        logger.warning(
+            f"TipoComprobante eliminado: {instance.codigo} "
+            f"(id={instance.id}, usuario={self.request.user.id})"
+        )
+        instance.delete()
 
 
-class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
+class SecuenciaNCFViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar secuencias de NCF.
 
@@ -184,22 +190,28 @@ class SecuenciaNCFViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         return SecuenciaNCFSerializer
 
     def perform_create(self, serializer):
-        """Asigna empresa y usuario al crear"""
+        """Asigna empresa y usuario al crear con logging"""
+        super().perform_create(serializer)
         logger.info(
-            f"Creando SecuenciaNCF por usuario {self.request.user.id}"
-        )
-        serializer.save(
-            empresa=self.request.user.empresa,
-            usuario_creacion=self.request.user
+            f"SecuenciaNCF creada: tipo={serializer.instance.tipo_comprobante} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
         )
 
     def perform_update(self, serializer):
-        """Asigna usuario de modificación"""
+        """Asigna usuario de modificación con logging"""
+        super().perform_update(serializer)
         logger.info(
-            f"Actualizando SecuenciaNCF {serializer.instance.id} "
-            f"por usuario {self.request.user.id}"
+            f"SecuenciaNCF actualizada: id={serializer.instance.id} "
+            f"(usuario={self.request.user.id})"
         )
-        serializer.save(usuario_modificacion=self.request.user)
+
+    def perform_destroy(self, instance):
+        """Elimina secuencia NCF con logging"""
+        logger.warning(
+            f"SecuenciaNCF eliminada: id={instance.id}, tipo={instance.tipo_comprobante} "
+            f"(usuario={self.request.user.id})"
+        )
+        instance.delete()
 
     @action(detail=False, methods=['get'])
     def activas(self, request):

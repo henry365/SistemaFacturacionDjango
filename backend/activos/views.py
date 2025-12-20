@@ -1,16 +1,23 @@
 """
 Views para Activos Fijos
+
+Incluye ViewSets para gestión de tipos de activos, activos fijos y depreciaciones.
+Todos los ViewSets usan mixins estándar para multi-tenancy y auditoría.
 """
 import logging
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
 
-from core.mixins import EmpresaFilterMixin
+from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
 from .services import DepreciacionService, ActivoFijoService
-from .permissions import CanDepreciarActivo, CanCambiarEstadoActivo, CanVerProyeccion
+from .permissions import (
+    CanDepreciarActivo, CanCambiarEstadoActivo, CanVerProyeccion,
+    CanGestionarTipoActivo, CanGestionarActivoFijo
+)
 
 
 class ActivosPagination(PageNumberPagination):
@@ -39,7 +46,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-class TipoActivoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
+class TipoActivoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de activos.
 
@@ -49,21 +56,53 @@ class TipoActivoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     - GET /api/v1/activos/tipos/{id}/ - Detalle de tipo
     - PUT/PATCH /api/v1/activos/tipos/{id}/ - Actualiza tipo
     - DELETE /api/v1/activos/tipos/{id}/ - Elimina tipo
+
+    Permisos:
+    - IsAuthenticated para lectura
+    - CanGestionarTipoActivo para crear/editar/eliminar
     """
-    queryset = TipoActivo.objects.all()
+    queryset = TipoActivo.objects.select_related('empresa').all()
     serializer_class = TipoActivoSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = ActivosPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['activo']
     search_fields = ['nombre', 'descripcion']
     ordering_fields = ['nombre', 'porcentaje_depreciacion_anual']
     ordering = ['nombre']
 
+    def get_permissions(self):
+        """Aplica permisos según la acción"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAuthenticated(), CanGestionarTipoActivo()]
+        return [IsAuthenticated()]
+
     def perform_create(self, serializer):
-        serializer.save(empresa=self.request.user.empresa)
+        """Crea tipo de activo con auditoría y logging"""
+        super().perform_create(serializer)
+        logger.info(
+            f"TipoActivo creado: {serializer.instance.nombre} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
+        )
+
+    def perform_update(self, serializer):
+        """Actualiza tipo de activo con auditoría y logging"""
+        super().perform_update(serializer)
+        logger.info(
+            f"TipoActivo actualizado: {serializer.instance.nombre} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
+        )
+
+    def perform_destroy(self, instance):
+        """Elimina tipo de activo con logging"""
+        logger.warning(
+            f"TipoActivo eliminado: {instance.nombre} "
+            f"(id={instance.id}, usuario={self.request.user.id})"
+        )
+        instance.delete()
 
 
-class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
+class ActivoFijoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar activos fijos.
 
@@ -79,6 +118,13 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     - GET /api/v1/activos/activos/{id}/proyeccion_depreciacion/ - Proyeccion
     - GET /api/v1/activos/activos/por_estado/ - Resumen por estado
     - GET /api/v1/activos/activos/por_tipo/ - Resumen por tipo
+
+    Permisos:
+    - IsAuthenticated para lectura
+    - CanGestionarActivoFijo para crear/editar/eliminar
+    - CanDepreciarActivo para depreciar
+    - CanCambiarEstadoActivo para cambiar_estado
+    - CanVerProyeccion para proyeccion_depreciacion
     """
     queryset = ActivoFijo.objects.select_related(
         'tipo_activo',
@@ -89,10 +135,23 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
     ).all()
     permission_classes = [IsAuthenticated]
     pagination_class = ActivosPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['tipo_activo', 'estado', 'ubicacion_fisica']
     search_fields = ['codigo_interno', 'nombre', 'marca', 'modelo', 'serial']
     ordering_fields = ['codigo_interno', 'nombre', 'fecha_adquisicion', 'valor_adquisicion']
     ordering = ['-fecha_creacion']
+
+    def get_permissions(self):
+        """Aplica permisos según la acción"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAuthenticated(), CanGestionarActivoFijo()]
+        if self.action == 'depreciar':
+            return [IsAuthenticated(), CanDepreciarActivo()]
+        if self.action == 'cambiar_estado':
+            return [IsAuthenticated(), CanCambiarEstadoActivo()]
+        if self.action == 'proyeccion_depreciacion':
+            return [IsAuthenticated(), CanVerProyeccion()]
+        return [IsAuthenticated()]
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -100,13 +159,30 @@ class ActivoFijoViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
         return ActivoFijoSerializer
 
     def perform_create(self, serializer):
-        serializer.save(
-            empresa=self.request.user.empresa,
-            usuario_creacion=self.request.user
+        """Crea activo fijo con auditoría y logging"""
+        super().perform_create(serializer)
+        logger.info(
+            f"ActivoFijo creado: {serializer.instance.nombre} "
+            f"(id={serializer.instance.id}, codigo={serializer.instance.codigo_interno}, "
+            f"usuario={self.request.user.id})"
         )
 
     def perform_update(self, serializer):
-        serializer.save(usuario_modificacion=self.request.user)
+        """Actualiza activo fijo con auditoría y logging"""
+        super().perform_update(serializer)
+        logger.info(
+            f"ActivoFijo actualizado: {serializer.instance.nombre} "
+            f"(id={serializer.instance.id}, usuario={self.request.user.id})"
+        )
+
+    def perform_destroy(self, instance):
+        """Elimina activo fijo con logging"""
+        logger.warning(
+            f"ActivoFijo eliminado: {instance.nombre} "
+            f"(id={instance.id}, codigo={instance.codigo_interno}, "
+            f"usuario={self.request.user.id})"
+        )
+        instance.delete()
 
     @action(detail=False, methods=['get'])
     def por_estado(self, request):

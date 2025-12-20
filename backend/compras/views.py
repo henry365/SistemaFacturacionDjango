@@ -860,7 +860,7 @@ class LiquidacionImportacionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, Idemp
 # RETENCIONES FISCALES
 # =============================================================================
 
-class TipoRetencionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class TipoRetencionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de retención fiscal.
 
@@ -871,7 +871,9 @@ class TipoRetencionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.Model
         PUT/PATCH /tipos-retencion/{id}/ - Actualizar tipo
         DELETE /tipos-retencion/{id}/ - Eliminar tipo
     """
-    queryset = TipoRetencion.objects.select_related('empresa').all()
+    queryset = TipoRetencion.objects.select_related(
+        'empresa', 'usuario_creacion', 'usuario_modificacion'
+    ).all()
     serializer_class = TipoRetencionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -881,28 +883,63 @@ class TipoRetencionViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.Model
     ordering = ['categoria', 'codigo']
 
     def perform_create(self, serializer):
-        serializer.save(empresa=self.request.user.empresa)
+        """Log al crear tipo de retención."""
+        super().perform_create(serializer)
+        logger.info(f"TipoRetencion creado: {serializer.instance.codigo} (usuario={self.request.user.id})")
+
+    def perform_update(self, serializer):
+        """Log al actualizar tipo de retención."""
+        super().perform_update(serializer)
+        logger.info(f"TipoRetencion actualizado: {serializer.instance.codigo} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar tipo de retención."""
+        logger.warning(f"TipoRetencion eliminado: {instance.codigo} (usuario={self.request.user.id})")
+        instance.delete()
 
 
-class RetencionCompraViewSet(EmpresaFilterMixin, viewsets.ModelViewSet):
-    """ViewSet para gestionar retenciones aplicadas a compras"""
+class RetencionCompraViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar retenciones aplicadas a compras.
+
+    Endpoints:
+        GET /retenciones-compra/ - Listar retenciones
+        POST /retenciones-compra/ - Crear retención
+        GET /retenciones-compra/{id}/ - Detalle de retención
+        PUT/PATCH /retenciones-compra/{id}/ - Actualizar retención
+        DELETE /retenciones-compra/{id}/ - Eliminar retención
+        GET /retenciones-compra/por_compra/ - Retenciones de una compra
+    """
     queryset = RetencionCompra.objects.select_related(
-        'compra', 'tipo_retencion', 'usuario_creacion'
+        'compra', 'tipo_retencion', 'empresa',
+        'usuario_creacion', 'usuario_modificacion'
     ).all()
     serializer_class = RetencionCompraSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['compra', 'tipo_retencion', 'tipo_retencion__categoria']
     search_fields = ['compra__numero_factura_proveedor', 'tipo_retencion__nombre']
     ordering_fields = ['fecha_aplicacion', 'monto_retenido']
     ordering = ['-fecha_creacion']
 
     def perform_create(self, serializer):
+        """Crea retención con porcentaje del tipo."""
         tipo_retencion = serializer.validated_data.get('tipo_retencion')
-        serializer.save(
-            empresa=self.request.user.empresa,
-            usuario_creacion=self.request.user,
-            porcentaje=tipo_retencion.porcentaje if not serializer.validated_data.get('porcentaje') else serializer.validated_data['porcentaje']
-        )
+        porcentaje = serializer.validated_data.get('porcentaje') or tipo_retencion.porcentaje
+        # Save extra fields before calling super
+        serializer.validated_data['porcentaje'] = porcentaje
+        super().perform_create(serializer)
+        logger.info(f"RetencionCompra creada: compra={serializer.instance.compra_id} (usuario={self.request.user.id})")
+
+    def perform_update(self, serializer):
+        """Log al actualizar retención."""
+        super().perform_update(serializer)
+        logger.info(f"RetencionCompra actualizada: id={serializer.instance.id} (usuario={self.request.user.id})")
+
+    def perform_destroy(self, instance):
+        """Log al eliminar retención."""
+        logger.warning(f"RetencionCompra eliminada: id={instance.id} (usuario={self.request.user.id})")
+        instance.delete()
 
     @action(detail=False, methods=['get'])
     def por_compra(self, request):

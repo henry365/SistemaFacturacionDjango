@@ -14,7 +14,7 @@ from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin
+from core.mixins import EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin
 
 from .models import Caja, SesionCaja, MovimientoCaja
 from .serializers import (
@@ -56,7 +56,7 @@ class MovimientoCajaPagination(PageNumberPagination):
 # VIEWSETS
 # ============================================================
 
-class CajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class CajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar Cajas (puntos de venta).
 
@@ -175,7 +175,7 @@ class CajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
         return Response({'mensaje': f'Caja "{caja.nombre}" desactivada correctamente'})
 
 
-class SesionCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class SesionCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar Sesiones de Caja.
 
@@ -345,7 +345,7 @@ class SesionCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelVie
         return Response(resumen)
 
 
-class MovimientoCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, viewsets.ModelViewSet):
+class MovimientoCajaViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar Movimientos de Caja.
 
