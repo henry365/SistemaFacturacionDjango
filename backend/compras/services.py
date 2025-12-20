@@ -351,12 +351,13 @@ class ServicioDevoluciones:
                 )
 
             # Crear movimiento de inventario (salida)
+            # Nota: cantidad es positiva, el tipo_movimiento indica la dirección
             MovimientoInventario.objects.create(
                 empresa=devolucion.empresa,
                 almacen=almacen,
                 producto=detalle.producto,
                 tipo_movimiento='DEVOLUCION_PROVEEDOR',
-                cantidad=-detalle.cantidad,
+                cantidad=detalle.cantidad,
                 referencia=f"Devolución {devolucion.numero_devolucion}",
                 usuario=usuario,
                 usuario_creacion=usuario

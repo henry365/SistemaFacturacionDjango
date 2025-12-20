@@ -44,7 +44,8 @@ class DashboardAPITest(APITestCase):
             empresa=self.empresa,
             nombre='Cliente Test',
             tipo_identificacion='RNC',
-            numero_identificacion='987654321'
+            numero_identificacion='987654321',
+            limite_credito=Decimal('100000.00')  # Permite ventas a crédito
         )
 
         # Crear proveedor
@@ -300,7 +301,8 @@ class DashboardMultiEmpresaTest(APITestCase):
             empresa=self.empresa1,
             nombre='Cliente Empresa 1',
             tipo_identificacion='RNC',
-            numero_identificacion='111000111'
+            numero_identificacion='111000111',
+            limite_credito=Decimal('100000.00')
         )
 
         # Empresa 2
@@ -318,7 +320,8 @@ class DashboardMultiEmpresaTest(APITestCase):
             empresa=self.empresa2,
             nombre='Cliente Empresa 2',
             tipo_identificacion='RNC',
-            numero_identificacion='222000222'
+            numero_identificacion='222000222',
+            limite_credito=Decimal('100000.00')
         )
 
         # Crear CxC para empresa 1 (no ventas del día porque fecha es auto_now_add)

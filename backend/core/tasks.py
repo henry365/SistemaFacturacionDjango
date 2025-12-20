@@ -86,11 +86,11 @@ def notificar_factura_creada(factura_id: int) -> dict:
 
     try:
         factura = Factura.objects.select_related(
-            'cliente', 'empresa', 'usuario_creacion'
+            'cliente', 'empresa', 'usuario'
         ).get(id=factura_id)
         cliente = factura.cliente
 
-        if not cliente.email:
+        if not cliente.correo_electronico:
             return {
                 'status': 'skipped',
                 'reason': 'Cliente sin email'
@@ -126,7 +126,7 @@ Gracias por su preferencia.
             mensaje_html = None
 
         result = enviar_email_notificacion.call(
-            destinatario=cliente.email,
+            destinatario=cliente.correo_electronico,
             asunto=asunto,
             mensaje=mensaje,
             mensaje_html=mensaje_html
@@ -173,7 +173,7 @@ def notificar_cxc_vencida(cuenta_id: int) -> dict:
         ).get(id=cuenta_id)
         cliente = cuenta.cliente
 
-        if not cliente.email:
+        if not cliente.correo_electronico:
             return {
                 'status': 'skipped',
                 'reason': 'Cliente sin email'
@@ -214,7 +214,7 @@ Gracias por su atención.
             mensaje_html = None
 
         result = enviar_email_notificacion.call(
-            destinatario=cliente.email,
+            destinatario=cliente.correo_electronico,
             asunto=asunto,
             mensaje=mensaje,
             mensaje_html=mensaje_html

@@ -81,16 +81,18 @@ class NotificarFacturaCreadaTest(TestCase):
         self.cliente = Cliente.objects.create(
             empresa=self.empresa,
             nombre='Cliente Test',
-            email='cliente@test.com',
+            correo_electronico='cliente@test.com',
             tipo_identificacion='RNC',
-            numero_identificacion='987654321'
+            numero_identificacion='987654321',
+            limite_credito=Decimal('100000.00')
         )
 
         self.cliente_sin_email = Cliente.objects.create(
             empresa=self.empresa,
             nombre='Cliente Sin Email',
             tipo_identificacion='RNC',
-            numero_identificacion='111222333'
+            numero_identificacion='111222333',
+            limite_credito=Decimal('100000.00')
         )
 
         self.factura = Factura.objects.create(
@@ -170,9 +172,10 @@ class NotificarCxCVencidaTest(TestCase):
         self.cliente = Cliente.objects.create(
             empresa=self.empresa,
             nombre='Cliente Test',
-            email='cliente@test.com',
+            correo_electronico='cliente@test.com',
             tipo_identificacion='RNC',
-            numero_identificacion='987654321'
+            numero_identificacion='987654321',
+            limite_credito=Decimal('100000.00')
         )
 
         self.factura = Factura.objects.create(
@@ -190,6 +193,8 @@ class NotificarCxCVencidaTest(TestCase):
             empresa=self.empresa,
             cliente=self.cliente,
             factura=self.factura,
+            numero_documento='CXC-001',
+            fecha_documento=date.today() - timedelta(days=60),
             monto_original=Decimal('1000.00'),
             monto_cobrado=Decimal('0.00'),
             fecha_vencimiento=date.today() - timedelta(days=30)
@@ -261,7 +266,7 @@ class DGIIReportTaskTest(TestCase):
 
         self.assertEqual(result['status'], 'completed')
         self.assertIn('registros', result)
-        self.assertEqual(result['registros'], 1)
+        self.assertEqual(len(result['registros']), 1)
 
     def test_generar_reporte_606_sin_datos(self):
         """Test: Generar reporte 606 sin datos"""
@@ -274,7 +279,7 @@ class DGIIReportTaskTest(TestCase):
         )
 
         self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['registros'], 0)
+        self.assertEqual(len(result['registros']), 0)
 
 
 class GeneratedFieldTest(TestCase):
@@ -306,7 +311,8 @@ class GeneratedFieldTest(TestCase):
             empresa=self.empresa,
             nombre='Cliente Test',
             tipo_identificacion='RNC',
-            numero_identificacion='987654321'
+            numero_identificacion='987654321',
+            limite_credito=Decimal('100000.00')
         )
 
         factura = Factura.objects.create(
@@ -324,6 +330,8 @@ class GeneratedFieldTest(TestCase):
             empresa=self.empresa,
             cliente=cliente,
             factura=factura,
+            numero_documento='CXC-001',
+            fecha_documento=date.today(),
             monto_original=Decimal('1000.00'),
             monto_cobrado=Decimal('300.00'),
             fecha_vencimiento=date.today() + timedelta(days=30)
@@ -361,6 +369,8 @@ class GeneratedFieldTest(TestCase):
             empresa=self.empresa,
             proveedor=proveedor,
             compra=compra,
+            numero_documento='CXP-001',
+            fecha_documento=date.today(),
             monto_original=Decimal('5000.00'),
             monto_pagado=Decimal('2000.00'),
             fecha_vencimiento=date.today() + timedelta(days=30)
@@ -385,8 +395,7 @@ class GeneratedFieldTest(TestCase):
 
         almacen = Almacen.objects.create(
             empresa=self.empresa,
-            nombre='Almacen Principal',
-            codigo='ALM-001'
+            nombre='Almacen Principal'
         )
 
         inventario = InventarioProducto.objects.create(

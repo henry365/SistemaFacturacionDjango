@@ -46,7 +46,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-class TipoActivoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin, viewsets.ModelViewSet):
+class TipoActivoViewSet(EmpresaFilterMixin, IdempotencyMixin, viewsets.ModelViewSet):
     """
     ViewSet para gestionar tipos de activos.
 
@@ -60,6 +60,9 @@ class TipoActivoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
     Permisos:
     - IsAuthenticated para lectura
     - CanGestionarTipoActivo para crear/editar/eliminar
+
+    Nota: TipoActivo no tiene campos de auditoría (usuario_creacion/modificacion),
+    por lo que no usa EmpresaAuditMixin.
     """
     queryset = TipoActivo.objects.select_related('empresa').all()
     serializer_class = TipoActivoSerializer
@@ -78,16 +81,16 @@ class TipoActivoViewSet(EmpresaFilterMixin, EmpresaAuditMixin, IdempotencyMixin,
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
-        """Crea tipo de activo con auditoría y logging"""
-        super().perform_create(serializer)
+        """Crea tipo de activo asignando empresa del usuario"""
+        serializer.save(empresa=self.request.user.empresa)
         logger.info(
             f"TipoActivo creado: {serializer.instance.nombre} "
             f"(id={serializer.instance.id}, usuario={self.request.user.id})"
         )
 
     def perform_update(self, serializer):
-        """Actualiza tipo de activo con auditoría y logging"""
-        super().perform_update(serializer)
+        """Actualiza tipo de activo con logging"""
+        serializer.save()
         logger.info(
             f"TipoActivo actualizado: {serializer.instance.nombre} "
             f"(id={serializer.instance.id}, usuario={self.request.user.id})"

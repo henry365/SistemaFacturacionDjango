@@ -33,7 +33,7 @@ class DashboardValidacionesTest(APITestCase):
         """Configuración inicial para los tests"""
         self.empresa = Empresa.objects.create(
             nombre='Empresa Test',
-            rnc='1234567890001'
+            rnc='123456789'
         )
         self.user = User.objects.create_user(
             username='testuser',
@@ -131,7 +131,7 @@ class DashboardServiceTest(TestCase):
         """Configuración inicial"""
         self.empresa = Empresa.objects.create(
             nombre='Empresa Test',
-            rnc='1234567890001'
+            rnc='123456789'
         )
 
     def test_obtener_resumen_empresa_none(self):
@@ -261,11 +261,11 @@ class DashboardMultiEmpresaTest(APITestCase):
         """Configuración inicial"""
         self.empresa1 = Empresa.objects.create(
             nombre='Empresa 1',
-            rnc='1111111111001'
+            rnc='111111111'
         )
         self.empresa2 = Empresa.objects.create(
             nombre='Empresa 2',
-            rnc='2222222222002'
+            rnc='222222222'
         )
         self.user1 = User.objects.create_user(
             username='user1',

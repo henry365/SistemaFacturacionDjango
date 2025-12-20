@@ -74,7 +74,8 @@ class GeneradorReportesDGIITest(TestCase):
             empresa=self.empresa,
             nombre='Cliente DGII Test',
             numero_identificacion='444555666',
-            tipo_identificacion='RNC'
+            tipo_identificacion='RNC',
+            limite_credito=Decimal('100000.00')  # Permite ventas a crédito en tests
         )
         self.producto = Producto.objects.create(
             codigo_sku='PROD-DGII',
